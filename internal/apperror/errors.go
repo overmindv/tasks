@@ -1,0 +1,38 @@
+package apperror
+
+import "fmt"
+
+const (
+	AuthenticationRequired  = "AUTHENTICATION_REQUIRED"
+	PermissionDenied        = "PERMISSION_DENIED"
+	ValidationError         = "VALIDATION_ERROR"
+	TaskNotFound            = "TASK_NOT_FOUND"
+	TaskVersionNotFound     = "TASK_VERSION_NOT_FOUND"
+	TaskNotAvailable        = "TASK_NOT_AVAILABLE"
+	SubmissionNotFound      = "SUBMISSION_NOT_FOUND"
+	InvalidStatusTransition = "INVALID_STATUS_TRANSITION"
+	InvalidAnswer           = "INVALID_ANSWER"
+	IdempotencyKeyConflict  = "IDEMPOTENCY_KEY_CONFLICT"
+	InternalError           = "INTERNAL_ERROR"
+)
+
+// Error описывает безопасную публичную ошибку HTTP API.
+type Error struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Status  int    `json:"-"`
+}
+
+// Error возвращает строковое представление публичной ошибки.
+func (e *Error) Error() string {
+	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+}
+
+// New создаёт публичную ошибку с машинным кодом и HTTP-статусом.
+func New(code, message string, status int) *Error {
+	return &Error{
+		Code:    code,
+		Message: message,
+		Status:  status,
+	}
+}

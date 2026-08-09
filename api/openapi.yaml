@@ -1,0 +1,549 @@
+openapi: 3.1.0
+info:
+  title: tasks-it internal API
+  version: 1.0.0
+  description: Внутренний HTTP API тестовых IT-задач Overmindv.
+servers:
+  - url: http://tasks-it:8080
+paths:
+  /health:
+    get:
+      summary: Проверить liveness процесса
+      responses:
+        "200":
+          description: Процесс работает
+  /ready:
+    get:
+      summary: Проверить готовность PostgreSQL
+      responses:
+        "200":
+          description: Сервис готов
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/tasks:
+    post:
+      summary: Создать draft теста
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRoles"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskInput"
+      responses:
+        "201":
+          description: Тест создан
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTask"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    get:
+      summary: Получить административный список тестов
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRoles"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/TaskStatus"
+        - $ref: "#/components/parameters/TaskType"
+        - $ref: "#/components/parameters/Difficulty"
+        - $ref: "#/components/parameters/TopicID"
+      responses:
+        "200":
+          description: Список текущих версий
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /v1/admin/tasks/{id}:
+    parameters:
+      - $ref: "#/components/parameters/TaskID"
+      - $ref: "#/components/parameters/UserID"
+      - $ref: "#/components/parameters/UserRoles"
+    get:
+      summary: Получить тест с правильными вариантами
+      responses:
+        "200":
+          description: Текущая версия теста
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTask"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      summary: Создать следующую версию теста
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskInput"
+      responses:
+        "200":
+          description: Новая текущая версия
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTask"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      summary: Выполнить soft delete теста
+      responses:
+        "204":
+          description: Тест удалён
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/admin/tasks/{id}/status:
+    patch:
+      summary: Изменить lifecycle-статус
+      parameters:
+        - $ref: "#/components/parameters/TaskID"
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRoles"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status:
+                  $ref: "#/components/schemas/TaskStatus"
+      responses:
+        "200":
+          description: Статус изменён
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTask"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /v1/tasks:
+    get:
+      summary: Получить опубликованные тесты
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/TaskType"
+        - $ref: "#/components/parameters/Difficulty"
+        - $ref: "#/components/parameters/TopicID"
+      responses:
+        "200":
+          description: Список опубликованных тестов
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskList"
+  /v1/tasks/{id}:
+    get:
+      summary: Получить опубликованный тест без правильных ответов
+      parameters:
+        - $ref: "#/components/parameters/TaskID"
+      responses:
+        "200":
+          description: Текущая опубликованная версия
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicTask"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/tasks/{id}/submissions:
+    post:
+      summary: Отправить ответ по указанной версии
+      parameters:
+        - $ref: "#/components/parameters/TaskID"
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRolesOptional"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmissionInput"
+      responses:
+        "201":
+          description: Сохранённый результат
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /v1/submissions/{id}:
+    get:
+      summary: Получить сохранённый результат
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRolesOptional"
+      responses:
+        "200":
+          description: Результат владельца или администратора
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/me/submissions:
+    get:
+      summary: Получить историю текущего пользователя
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRolesOptional"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - name: task_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: История решений
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionList"
+components:
+  parameters:
+    UserID:
+      name: X-User-ID
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+    UserRoles:
+      name: X-User-Roles
+      in: header
+      required: true
+      schema:
+        type: string
+        examples: [admin, superuser]
+    UserRolesOptional:
+      name: X-User-Roles
+      in: header
+      required: false
+      schema:
+        type: string
+    TaskID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        default: 20
+        maximum: 100
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        default: 0
+        minimum: 0
+    TaskType:
+      name: task_type
+      in: query
+      schema:
+        $ref: "#/components/schemas/TaskType"
+    Difficulty:
+      name: difficulty
+      in: query
+      schema:
+        $ref: "#/components/schemas/Difficulty"
+    TopicID:
+      name: topic_id
+      in: query
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    TaskStatus:
+      type: string
+      enum: [draft, published, archived]
+    TaskType:
+      type: string
+      enum: [single_choice, multiple_choice]
+    Difficulty:
+      type: string
+      enum: [easy, medium, hard]
+    Verdict:
+      type: string
+      enum: [accepted, wrong_answer]
+    OptionInput:
+      type: object
+      additionalProperties: false
+      required: [text, is_correct]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        is_correct:
+          type: boolean
+    TaskInput:
+      type: object
+      additionalProperties: false
+      required: [title, statement, task_type, options]
+      properties:
+        topic_id:
+          type: [string, "null"]
+          format: uuid
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        statement:
+          type: string
+          minLength: 1
+          maxLength: 50000
+        task_type:
+          $ref: "#/components/schemas/TaskType"
+        difficulty:
+          $ref: "#/components/schemas/Difficulty"
+        options:
+          type: array
+          minItems: 2
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/OptionInput"
+    PublicOption:
+      type: object
+      required: [id, text, position]
+      properties:
+        id:
+          type: string
+          format: uuid
+        text:
+          type: string
+        position:
+          type: integer
+    AdminOption:
+      allOf:
+        - $ref: "#/components/schemas/PublicOption"
+        - type: object
+          required: [is_correct]
+          properties:
+            is_correct:
+              type: boolean
+    TaskBase:
+      type: object
+      required: [id, status, task_version_id, version_number, title, task_type, difficulty, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        task_version_id:
+          type: string
+          format: uuid
+        version_number:
+          type: integer
+        topic_id:
+          type: [string, "null"]
+          format: uuid
+        title:
+          type: string
+        task_type:
+          $ref: "#/components/schemas/TaskType"
+        difficulty:
+          $ref: "#/components/schemas/Difficulty"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PublicTask:
+      allOf:
+        - $ref: "#/components/schemas/TaskBase"
+        - type: object
+          required: [statement, options]
+          properties:
+            statement:
+              type: string
+            options:
+              type: array
+              items:
+                $ref: "#/components/schemas/PublicOption"
+    AdminTask:
+      allOf:
+        - $ref: "#/components/schemas/TaskBase"
+        - type: object
+          required: [statement, options]
+          properties:
+            statement:
+              type: string
+            options:
+              type: array
+              items:
+                $ref: "#/components/schemas/AdminOption"
+    TaskList:
+      type: object
+      required: [items, limit, offset]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskBase"
+        limit:
+          type: integer
+        offset:
+          type: integer
+    SubmissionInput:
+      type: object
+      additionalProperties: false
+      required: [task_version_id, idempotency_key, selected_option_ids]
+      properties:
+        task_version_id:
+          type: string
+          format: uuid
+        idempotency_key:
+          type: string
+          format: uuid
+        selected_option_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+    Submission:
+      type: object
+      required: [id, user_id, task_id, task_version_id, task_version_number, selected_option_ids, correct_option_ids, correct, verdict, task_updated, latest_task_version_id, latest_version_number, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        task_id:
+          type: string
+          format: uuid
+        task_version_id:
+          type: string
+          format: uuid
+        task_version_number:
+          type: integer
+        selected_option_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        correct_option_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        correct:
+          type: boolean
+        verdict:
+          $ref: "#/components/schemas/Verdict"
+        task_updated:
+          type: boolean
+        latest_task_version_id:
+          type: string
+          format: uuid
+        latest_version_number:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+    SubmissionList:
+      type: object
+      required: [items, limit, offset]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Submission"
+        limit:
+          type: integer
+        offset:
+          type: integer
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          pattern: "^[A-Z0-9_]+$"
+        message:
+          type: string
+  responses:
+    BadRequest:
+      description: Некорректный запрос
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Нет доверенного пользователя
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Недостаточно прав
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Сущность не найдена
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: Конфликт lifecycle или idempotency
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ServiceUnavailable:
+      description: PostgreSQL временно недоступен
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
