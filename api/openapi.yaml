@@ -139,6 +139,103 @@ paths:
                 $ref: "#/components/schemas/AdminTask"
         "409":
           $ref: "#/components/responses/Conflict"
+  /v1/internal/task-candidates/batch:
+    post:
+      summary: Идемпотентно принять batch кандидатов от task-hunter
+      parameters:
+        - $ref: "#/components/parameters/ServiceAuthorization"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    $ref: "#/components/schemas/CandidateImport"
+      responses:
+        "200":
+          description: Результат каждого элемента — imported, duplicate, invalid или error
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/admin/task-candidates:
+    get:
+      summary: Получить очередь кандидатов
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRoles"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/CandidateStatus"
+        - name: source_id
+          in: query
+          schema: { type: string }
+        - $ref: "#/components/parameters/Difficulty"
+      responses:
+        "200": { description: Пагинированный список кандидатов }
+  /v1/admin/task-candidates/{id}:
+    parameters:
+      - $ref: "#/components/parameters/TaskID"
+      - $ref: "#/components/parameters/UserID"
+      - $ref: "#/components/parameters/UserRoles"
+    get:
+      summary: Получить кандидата с provenance
+      responses:
+        "200": { description: Кандидат }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      summary: Обновить pending-кандидата при совпавшей revision
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CandidateReview" }
+      responses:
+        "200": { description: Обновлённый кандидат }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/task-candidates/{id}/approve:
+    post:
+      summary: Атомарно опубликовать programming-задачу
+      parameters:
+        - $ref: "#/components/parameters/TaskID"
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRoles"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CandidateReview" }
+      responses:
+        "200": { description: Опубликованная programming-задача }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/task-candidates/{id}/reject:
+    post:
+      summary: Отклонить pending-кандидата
+      parameters:
+        - $ref: "#/components/parameters/TaskID"
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRoles"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision]
+              properties:
+                expected_revision: { type: integer, minimum: 1 }
+                reason: { type: string, maxLength: 1000 }
+      responses:
+        "200": { description: Отклонённый кандидат }
+        "409": { $ref: "#/components/responses/Conflict" }
   /v1/tasks:
     get:
       summary: Получить опубликованные тесты
@@ -258,6 +355,13 @@ components:
       required: false
       schema:
         type: string
+    ServiceAuthorization:
+      name: Authorization
+      in: header
+      required: true
+      schema:
+        type: string
+        pattern: "^Bearer .+$"
     TaskID:
       name: id
       in: path
@@ -301,7 +405,10 @@ components:
       enum: [draft, published, archived]
     TaskType:
       type: string
-      enum: [single_choice, multiple_choice]
+      enum: [single_choice, multiple_choice, programming]
+    CandidateStatus:
+      type: string
+      enum: [pending, approved, rejected]
     Difficulty:
       type: string
       enum: [easy, medium, hard]
@@ -341,10 +448,23 @@ components:
           $ref: "#/components/schemas/Difficulty"
         options:
           type: array
-          minItems: 2
           maxItems: 20
           items:
             $ref: "#/components/schemas/OptionInput"
+        tags:
+          type: array
+          maxItems: 50
+          items: { type: string, maxLength: 100 }
+        examples:
+          type: array
+          maxItems: 20
+          items: { $ref: "#/components/schemas/TaskExample" }
+        constraints:
+          type: array
+          maxItems: 50
+          items: { type: string }
+        source:
+          $ref: "#/components/schemas/TaskSource"
     PublicOption:
       type: object
       required: [id, text, position]
@@ -393,6 +513,82 @@ components:
         updated_at:
           type: string
           format: date-time
+        tags:
+          type: array
+          items: { type: string }
+        examples:
+          type: array
+          items: { $ref: "#/components/schemas/TaskExample" }
+        constraints:
+          type: array
+          items: { type: string }
+        source:
+          $ref: "#/components/schemas/TaskSource"
+    TaskExample:
+      type: object
+      required: [input, output]
+      properties:
+        input: { type: string }
+        output: { type: string }
+        explanation: { type: string }
+    TaskSource:
+      type: object
+      required: [source_id, source_url]
+      properties:
+        source_id: { type: string }
+        source_name: { type: string }
+        source_url: { type: string, format: uri }
+        published_at: { type: [string, "null"], format: date-time }
+    CandidateReview:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, title, statement, difficulty, tags, examples, constraints]
+      properties:
+        expected_revision: { type: integer, minimum: 1 }
+        topic_id: { type: [string, "null"], format: uuid }
+        title: { type: string, minLength: 1, maxLength: 200 }
+        statement: { type: string, minLength: 1, maxLength: 50000 }
+        difficulty: { $ref: "#/components/schemas/Difficulty" }
+        tags:
+          type: array
+          maxItems: 50
+          items: { type: string, maxLength: 100 }
+        examples:
+          type: array
+          maxItems: 20
+          items: { $ref: "#/components/schemas/TaskExample" }
+        constraints:
+          type: array
+          maxItems: 50
+          items: { type: string }
+    CandidateImport:
+      type: object
+      additionalProperties: false
+      required: [external_id, source_id, source_url, source_hash, retrieved_at, collection_job_id, title, statement, difficulty, tags, examples, constraints]
+      properties:
+        external_id: { type: string }
+        source_id: { type: string }
+        source_name: { type: string }
+        source_url: { type: string, format: uri }
+        source_hash: { type: string }
+        source_published_at: { type: [string, "null"], format: date-time }
+        retrieved_at: { type: string, format: date-time }
+        collection_job_id: { type: string, format: uuid }
+        title: { type: string, minLength: 1, maxLength: 200 }
+        statement: { type: string, minLength: 1, maxLength: 50000 }
+        difficulty: { $ref: "#/components/schemas/Difficulty" }
+        tags:
+          type: array
+          maxItems: 50
+          items: { type: string, maxLength: 100 }
+        examples:
+          type: array
+          maxItems: 20
+          items: { $ref: "#/components/schemas/TaskExample" }
+        constraints:
+          type: array
+          maxItems: 50
+          items: { type: string }
     PublicTask:
       allOf:
         - $ref: "#/components/schemas/TaskBase"

@@ -62,7 +62,14 @@ func TestVersionedTaskFlow(t *testing.T) {
 	}
 	store := postgresadapter.New(pool)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	handler := httpapi.New(usecase.NewTaskService(store), usecase.NewSubmissionService(store), store, logger)
+	handler := httpapi.New(
+		usecase.NewTaskService(store),
+		usecase.NewSubmissionService(store),
+		usecase.NewCandidateService(store),
+		store,
+		logger,
+		"component-ingest-token",
+	)
 	adminID := uuid.NewString()
 	userID := uuid.NewString()
 	created := componentTaskRequest(t, handler, http.MethodPost, "/v1/admin/tasks", adminID, "admin", map[string]any{

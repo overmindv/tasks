@@ -145,5 +145,5 @@ func newHandlerRepository() (*handlerRepository, uuid.UUID, uuid.UUID) {
 func testHandler(repo *handlerRepository) http.Handler {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	return New(usecase.NewTaskService(repo), usecase.NewSubmissionService(repo), repo, logger)
+	return New(usecase.NewTaskService(repo), usecase.NewSubmissionService(repo), usecase.NewCandidateService(repo), repo, logger, "test-ingest-token")
 }

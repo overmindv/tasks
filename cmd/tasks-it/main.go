@@ -36,9 +36,10 @@ func main() {
 	store := postgresadapter.New(pool)
 	taskService := usecase.NewTaskService(store)
 	submissionService := usecase.NewSubmissionService(store)
+	candidateService := usecase.NewCandidateService(store)
 	server := &http.Server{
 		Addr:              cfg.HTTPAddress,
-		Handler:           httpapi.New(taskService, submissionService, store, logger),
+		Handler:           httpapi.New(taskService, submissionService, candidateService, store, logger, cfg.TaskHunterIngestToken),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       cfg.ReadTimeout,
 		WriteTimeout:      cfg.WriteTimeout,

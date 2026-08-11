@@ -19,13 +19,14 @@ const (
 )
 
 type Config struct {
-	ServiceName  string
-	HTTPAddress  string
-	DatabaseURL  string
-	LogLevel     string
-	Environment  string
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
+	ServiceName           string
+	HTTPAddress           string
+	DatabaseURL           string
+	LogLevel              string
+	Environment           string
+	ReadTimeout           time.Duration
+	WriteTimeout          time.Duration
+	TaskHunterIngestToken string
 }
 
 // Load читает, нормализует и проверяет конфигурацию окружения.
@@ -41,13 +42,14 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		ServiceName:  env("SERVICE_NAME", defaultServiceName),
-		HTTPAddress:  env("HTTP_ADDR", defaultHTTPAddress),
-		DatabaseURL:  strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		LogLevel:     env("LOG_LEVEL", defaultLogLevel),
-		Environment:  env("ENV", defaultEnvironment),
-		ReadTimeout:  readTimeout,
-		WriteTimeout: writeTimeout,
+		ServiceName:           env("SERVICE_NAME", defaultServiceName),
+		HTTPAddress:           env("HTTP_ADDR", defaultHTTPAddress),
+		DatabaseURL:           strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		LogLevel:              env("LOG_LEVEL", defaultLogLevel),
+		Environment:           env("ENV", defaultEnvironment),
+		ReadTimeout:           readTimeout,
+		WriteTimeout:          writeTimeout,
+		TaskHunterIngestToken: strings.TrimSpace(os.Getenv("TASK_HUNTER_INGEST_TOKEN")),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -99,6 +101,9 @@ func (c Config) Validate() error {
 
 	if c.WriteTimeout <= 0 {
 		return errors.New("WRITE_TIMEOUT должен быть больше нуля")
+	}
+	if c.TaskHunterIngestToken == "" {
+		return errors.New("TASK_HUNTER_INGEST_TOKEN не задан")
 	}
 
 	return nil

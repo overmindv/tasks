@@ -3,17 +3,21 @@ package apperror
 import "fmt"
 
 const (
-	AuthenticationRequired  = "AUTHENTICATION_REQUIRED"
-	PermissionDenied        = "PERMISSION_DENIED"
-	ValidationError         = "VALIDATION_ERROR"
-	TaskNotFound            = "TASK_NOT_FOUND"
-	TaskVersionNotFound     = "TASK_VERSION_NOT_FOUND"
-	TaskNotAvailable        = "TASK_NOT_AVAILABLE"
-	SubmissionNotFound      = "SUBMISSION_NOT_FOUND"
-	InvalidStatusTransition = "INVALID_STATUS_TRANSITION"
-	InvalidAnswer           = "INVALID_ANSWER"
-	IdempotencyKeyConflict  = "IDEMPOTENCY_KEY_CONFLICT"
-	InternalError           = "INTERNAL_ERROR"
+	AuthenticationRequired    = "AUTHENTICATION_REQUIRED"
+	PermissionDenied          = "PERMISSION_DENIED"
+	ValidationError           = "VALIDATION_ERROR"
+	TaskNotFound              = "TASK_NOT_FOUND"
+	TaskVersionNotFound       = "TASK_VERSION_NOT_FOUND"
+	TaskNotAvailable          = "TASK_NOT_AVAILABLE"
+	SubmissionNotFound        = "SUBMISSION_NOT_FOUND"
+	InvalidStatusTransition   = "INVALID_STATUS_TRANSITION"
+	InvalidAnswer             = "INVALID_ANSWER"
+	IdempotencyKeyConflict    = "IDEMPOTENCY_KEY_CONFLICT"
+	CandidateNotFound         = "CANDIDATE_NOT_FOUND"
+	CandidateRevisionConflict = "CANDIDATE_REVISION_CONFLICT"
+	CandidateNotPending       = "CANDIDATE_NOT_PENDING"
+	TaskTypeNotSubmittable    = "TASK_TYPE_NOT_SUBMITTABLE"
+	InternalError             = "INTERNAL_ERROR"
 )
 
 // Error описывает безопасную публичную ошибку HTTP API.

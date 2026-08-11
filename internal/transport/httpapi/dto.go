@@ -10,12 +10,29 @@ import (
 )
 
 type taskInput struct {
-	TopicID    *string       `json:"topic_id"`
-	Title      string        `json:"title"`
-	Statement  string        `json:"statement"`
-	TaskType   string        `json:"task_type"`
-	Difficulty string        `json:"difficulty"`
-	Options    []optionInput `json:"options"`
+	TopicID     *string        `json:"topic_id"`
+	Title       string         `json:"title"`
+	Statement   string         `json:"statement"`
+	TaskType    string         `json:"task_type"`
+	Difficulty  string         `json:"difficulty"`
+	Options     []optionInput  `json:"options"`
+	Tags        []string       `json:"tags"`
+	Examples    []exampleInput `json:"examples"`
+	Constraints []string       `json:"constraints"`
+	Source      *sourceInput   `json:"source"`
+}
+
+type exampleInput struct {
+	Input       string `json:"input"`
+	Output      string `json:"output"`
+	Explanation string `json:"explanation"`
+}
+
+type sourceInput struct {
+	SourceID    string     `json:"source_id"`
+	SourceName  string     `json:"source_name"`
+	SourceURL   string     `json:"source_url"`
+	PublishedAt *time.Time `json:"published_at"`
 }
 
 type optionInput struct {
@@ -51,6 +68,10 @@ type taskResponse struct {
 	TaskType      string           `json:"task_type"`
 	Difficulty    string           `json:"difficulty"`
 	Options       []optionResponse `json:"options"`
+	Tags          []string         `json:"tags"`
+	Examples      []exampleInput   `json:"examples"`
+	Constraints   []string         `json:"constraints"`
+	Source        *sourceInput     `json:"source,omitempty"`
 	CreatedAt     time.Time        `json:"created_at"`
 	UpdatedAt     time.Time        `json:"updated_at"`
 }
@@ -110,6 +131,12 @@ func (input taskInput) domainInput() (domain.TaskInput, error) {
 		TaskType:   domain.TaskType(input.TaskType),
 		Difficulty: domain.Difficulty(input.Difficulty),
 		Options:    options,
+		Tags:       input.Tags,
+		Examples: lo.Map(input.Examples, func(example exampleInput, _ int) domain.TaskExample {
+			return domain.TaskExample{Input: example.Input, Output: example.Output, Explanation: example.Explanation}
+		}),
+		Constraints: input.Constraints,
+		Source:      taskSource(input.Source),
 	}, nil
 }
 
@@ -140,9 +167,33 @@ func responseTask(detail domain.TaskDetail, admin bool) taskResponse {
 		TaskType:      string(detail.Version.TaskType),
 		Difficulty:    string(detail.Version.Difficulty),
 		Options:       options,
-		CreatedAt:     detail.Task.CreatedAt,
-		UpdatedAt:     detail.Task.UpdatedAt,
+		Tags:          detail.Version.Tags,
+		Examples: lo.Map(detail.Version.Examples, func(example domain.TaskExample, _ int) exampleInput {
+			return exampleInput{Input: example.Input, Output: example.Output, Explanation: example.Explanation}
+		}),
+		Constraints: detail.Version.Constraints,
+		Source:      sourceResponse(detail.Version.Source),
+		CreatedAt:   detail.Task.CreatedAt,
+		UpdatedAt:   detail.Task.UpdatedAt,
 	}
+}
+
+// taskSource преобразует transport-атрибуцию в доменную модель.
+func taskSource(input *sourceInput) *domain.TaskSource {
+	if input == nil {
+		return nil
+	}
+
+	return &domain.TaskSource{SourceID: input.SourceID, SourceName: input.SourceName, SourceURL: input.SourceURL, PublishedAt: input.PublishedAt}
+}
+
+// sourceResponse преобразует доменную атрибуцию в transport DTO.
+func sourceResponse(source *domain.TaskSource) *sourceInput {
+	if source == nil {
+		return nil
+	}
+
+	return &sourceInput{SourceID: source.SourceID, SourceName: source.SourceName, SourceURL: source.SourceURL, PublishedAt: source.PublishedAt}
 }
 
 // responseTaskSummary преобразует доменную задачу в элемент списка.

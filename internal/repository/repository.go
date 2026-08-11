@@ -14,6 +14,7 @@ type Repository interface {
 	InsertTask(ctx context.Context, task domain.Task) error
 	InsertTaskVersion(ctx context.Context, version domain.TaskVersion) error
 	InsertTaskOptions(ctx context.Context, options []domain.TaskOption) error
+	InsertTaskContent(ctx context.Context, version domain.TaskVersion) error
 	GetTask(ctx context.Context, id uuid.UUID, lock bool) (domain.Task, error)
 	GetCurrentTaskVersion(ctx context.Context, taskID uuid.UUID) (domain.TaskVersion, error)
 	GetTaskVersion(ctx context.Context, taskID, versionID uuid.UUID) (domain.TaskVersion, error)
@@ -27,4 +28,10 @@ type Repository interface {
 	InsertSubmissionAnswers(ctx context.Context, submissionID, versionID uuid.UUID, optionIDs []uuid.UUID) error
 	GetSubmission(ctx context.Context, id uuid.UUID) (domain.Submission, error)
 	ListSubmissions(ctx context.Context, filter domain.SubmissionFilter) ([]domain.Submission, error)
+	InsertCandidate(ctx context.Context, candidate domain.TaskCandidate) (bool, error)
+	GetCandidate(ctx context.Context, id uuid.UUID, lock bool) (domain.TaskCandidate, error)
+	ListCandidates(ctx context.Context, filter domain.CandidateFilter) ([]domain.TaskCandidate, error)
+	UpdateCandidate(ctx context.Context, candidate domain.TaskCandidate, expectedRevision int) error
+	MarkCandidateApproved(ctx context.Context, candidateID, taskID, actorID uuid.UUID, expectedRevision int) error
+	MarkCandidateRejected(ctx context.Context, candidateID, actorID uuid.UUID, expectedRevision int, reason string) error
 }
