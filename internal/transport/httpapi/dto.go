@@ -105,6 +105,27 @@ type submissionResponse struct {
 	CreatedAt           time.Time `json:"created_at"`
 }
 
+type codeSubmissionResponse struct {
+	ID                string                       `json:"id"`
+	UserID            string                       `json:"user_id"`
+	TaskID            string                       `json:"task_id"`
+	TaskVersionID     string                       `json:"task_version_id"`
+	TaskVersionNumber int                          `json:"task_version_number"`
+	ExecutionID       string                       `json:"execution_id"`
+	CorrelationID     string                       `json:"correlation_id"`
+	Language          string                       `json:"language"`
+	SourceFileName    string                       `json:"source_file_name"`
+	Status            string                       `json:"status"`
+	Verdict           *domain.ExecutionVerdict     `json:"verdict,omitempty"`
+	Compilation       *domain.ExecutionPhaseResult `json:"compilation,omitempty"`
+	Execution         *domain.ExecutionPhaseResult `json:"execution,omitempty"`
+	Tests             []domain.ExecutionTestResult `json:"tests"`
+	Failure           *domain.ExecutionFailure     `json:"failure,omitempty"`
+	CreatedAt         time.Time                    `json:"created_at"`
+	UpdatedAt         time.Time                    `json:"updated_at"`
+	CompletedAt       *time.Time                   `json:"completed_at,omitempty"`
+}
+
 type listResponse[T any] struct {
 	Items  []T `json:"items"`
 	Limit  int `json:"limit"`
@@ -228,6 +249,35 @@ func responseSubmission(submission domain.Submission) submissionResponse {
 		LatestTaskVersionID: submission.LatestTaskVersionID.String(),
 		LatestVersionNumber: submission.LatestVersionNumber,
 		CreatedAt:           submission.CreatedAt,
+	}
+}
+
+// responseCodeSubmission преобразует запуск в DTO без исходного кода пользователя.
+func responseCodeSubmission(submission domain.CodeSubmission) codeSubmissionResponse {
+	tests := submission.Tests
+	if tests == nil {
+		tests = []domain.ExecutionTestResult{}
+	}
+
+	return codeSubmissionResponse{
+		ID:                submission.ID.String(),
+		UserID:            submission.UserID.String(),
+		TaskID:            submission.TaskID.String(),
+		TaskVersionID:     submission.TaskVersionID.String(),
+		TaskVersionNumber: submission.TaskVersionNumber,
+		ExecutionID:       submission.ExecutionID.String(),
+		CorrelationID:     submission.CorrelationID.String(),
+		Language:          string(submission.Language),
+		SourceFileName:    submission.SourceFileName,
+		Status:            string(submission.Status),
+		Verdict:           submission.Verdict,
+		Compilation:       submission.Compilation,
+		Execution:         submission.Execution,
+		Tests:             tests,
+		Failure:           submission.Failure,
+		CreatedAt:         submission.CreatedAt,
+		UpdatedAt:         submission.UpdatedAt,
+		CompletedAt:       submission.CompletedAt,
 	}
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -14,8 +15,30 @@ import (
 	postgresadapter "github.com/overmindv/tasks-it/internal/adapter/postgres"
 	"github.com/overmindv/tasks-it/internal/config"
 	"github.com/overmindv/tasks-it/internal/transport/httpapi"
+	kafkaadapter "github.com/overmindv/tasks-it/internal/transport/kafka"
 	"github.com/overmindv/tasks-it/internal/usecase"
 )
+
+type healthChecks struct {
+	postgres interface {
+		Ping(ctx context.Context) error
+	}
+	kafka interface {
+		Ping(ctx context.Context) error
+	}
+}
+
+// Ping проверяет все обязательные зависимости readiness endpoint.
+func (h healthChecks) Ping(ctx context.Context) error {
+	if err := h.postgres.Ping(ctx); err != nil {
+		return fmt.Errorf("postgresql недоступен: %w", err)
+	}
+	if err := h.kafka.Ping(ctx); err != nil {
+		return fmt.Errorf("kafka недоступна: %w", err)
+	}
+
+	return nil
+}
 
 // main загружает зависимости и запускает внутренний HTTP API tasks-it.
 func main() {
@@ -34,23 +57,56 @@ func main() {
 	}
 	defer pool.Close()
 	store := postgresadapter.New(pool)
+	producer, err := kafkaadapter.NewProducer(cfg.KafkaBrokers)
+	if err != nil {
+		logger.Error("не удалось создать Kafka producer", "error", err)
+		os.Exit(1)
+	}
+	defer producer.Close()
+	consumerClient, err := kafkaadapter.NewConsumerClient(cfg.KafkaBrokers, cfg.KafkaResultsTopic, cfg.KafkaResultsGroup)
+	if err != nil {
+		logger.Error("не удалось создать Kafka result consumer", "error", err)
+		os.Exit(1)
+	}
+	defer consumerClient.Close()
 	taskService := usecase.NewTaskService(store)
 	submissionService := usecase.NewSubmissionService(store)
+	codeSubmissionService := usecase.NewCodeSubmissionService(store, usecase.CodeExecutionPolicy{
+		RequestsTopic:    cfg.KafkaRequestsTopic,
+		TimeLimit:        cfg.CodeExecutionTimeout,
+		MemoryLimitBytes: cfg.CodeExecutionMemory,
+	})
 	candidateService := usecase.NewCandidateService(store)
+	health := healthChecks{
+		postgres: store,
+		kafka:    producer,
+	}
 	server := &http.Server{
 		Addr:              cfg.HTTPAddress,
-		Handler:           httpapi.New(taskService, submissionService, candidateService, store, logger, cfg.TaskHunterIngestToken),
+		Handler:           httpapi.New(taskService, submissionService, codeSubmissionService, candidateService, health, logger, cfg.TaskHunterIngestToken),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       cfg.ReadTimeout,
 		WriteTimeout:      cfg.WriteTimeout,
 		IdleTimeout:       60 * time.Second,
 	}
+	dispatcher := kafkaadapter.NewOutboxDispatcher(store, producer, cfg.OutboxPollInterval, logger)
+	consumer := kafkaadapter.NewResultConsumer(consumerClient, codeSubmissionService, logger)
 	go serve(server, logger, stop, cfg)
+	go runWorker(ctx, "Kafka outbox dispatcher", dispatcher.Run, logger, stop)
+	go runWorker(ctx, "Kafka result consumer", consumer.Run, logger, stop)
 	<-ctx.Done()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("не удалось корректно остановить HTTP-сервер", "error", err)
+	}
+}
+
+// runWorker останавливает процесс при неожиданной ошибке фонового worker'а.
+func runWorker(ctx context.Context, name string, run func(context.Context) error, logger *slog.Logger, stop context.CancelFunc) {
+	if err := run(ctx); err != nil && ctx.Err() == nil {
+		logger.Error(name+" завершился с ошибкой", "error", err)
+		stop()
 	}
 }
 

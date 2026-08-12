@@ -16,6 +16,7 @@ type healthChecker interface {
 type Handler struct {
 	tasks       *usecase.TaskService
 	submissions *usecase.SubmissionService
+	code        *usecase.CodeSubmissionService
 	candidates  *usecase.CandidateService
 	health      healthChecker
 	logger      *slog.Logger
@@ -23,10 +24,11 @@ type Handler struct {
 }
 
 // New создаёт HTTP handler со всеми маршрутами и middleware.
-func New(tasksService *usecase.TaskService, submissionService *usecase.SubmissionService, candidateService *usecase.CandidateService, health healthChecker, logger *slog.Logger, ingestToken string) http.Handler {
+func New(tasksService *usecase.TaskService, submissionService *usecase.SubmissionService, codeSubmissionService *usecase.CodeSubmissionService, candidateService *usecase.CandidateService, health healthChecker, logger *slog.Logger, ingestToken string) http.Handler {
 	handler := &Handler{
 		tasks:       tasksService,
 		submissions: submissionService,
+		code:        codeSubmissionService,
 		candidates:  candidateService,
 		health:      health,
 		logger:      logger,
@@ -50,8 +52,11 @@ func New(tasksService *usecase.TaskService, submissionService *usecase.Submissio
 	mux.HandleFunc("GET /v1/tasks", handler.listPublishedTasks)
 	mux.HandleFunc("GET /v1/tasks/{id}", handler.getPublishedTask)
 	mux.HandleFunc("POST /v1/tasks/{id}/submissions", handler.submitAnswer)
+	mux.HandleFunc("POST /v1/tasks/{id}/code-submissions", handler.submitCode)
 	mux.HandleFunc("GET /v1/submissions/{id}", handler.getSubmission)
+	mux.HandleFunc("GET /v1/code-submissions/{id}", handler.getCodeSubmission)
 	mux.HandleFunc("GET /v1/me/submissions", handler.listMySubmissions)
+	mux.HandleFunc("GET /v1/me/code-submissions", handler.listMyCodeSubmissions)
 
 	return requestIDMiddleware(recoverMiddleware(logger, loggingMiddleware(logger, mux)))
 }

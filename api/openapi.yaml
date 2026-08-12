@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: tasks-it internal API
-  version: 1.0.0
+  version: 1.1.0
   description: Внутренний HTTP API тестовых IT-задач Overmindv.
 servers:
   - url: http://tasks-it:8080
@@ -14,7 +14,7 @@ paths:
           description: Процесс работает
   /ready:
     get:
-      summary: Проверить готовность PostgreSQL
+      summary: Проверить готовность PostgreSQL и Kafka
       responses:
         "200":
           description: Сервис готов
@@ -290,6 +290,31 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "409":
           $ref: "#/components/responses/Conflict"
+  /v1/tasks/{id}/code-submissions:
+    post:
+      summary: Загрузить файл решения programming-задачи
+      description: Атомарно сохраняет запуск и outbox event, затем возвращает состояние queued.
+      parameters:
+        - $ref: "#/components/parameters/TaskID"
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRolesOptional"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/CodeSubmissionInput"
+      responses:
+        "202":
+          description: Решение принято в очередь
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodeSubmission"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /v1/submissions/{id}:
     get:
       summary: Получить сохранённый результат
@@ -333,6 +358,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SubmissionList"
+  /v1/code-submissions/{id}:
+    get:
+      summary: Получить состояние и результат запуска
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRolesOptional"
+      responses:
+        "200":
+          description: Запуск владельца или администратора
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodeSubmission"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/me/code-submissions:
+    get:
+      summary: Получить историю programming-запусков текущего пользователя
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRolesOptional"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - name: task_id
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: История programming-решений
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodeSubmissionList"
 components:
   parameters:
     UserID:
@@ -415,6 +479,25 @@ components:
     Verdict:
       type: string
       enum: [accepted, wrong_answer]
+    ProgrammingLanguage:
+      type: string
+      enum: [python, go]
+    CodeSubmissionStatus:
+      type: string
+      enum: [queued, completed]
+    ExecutionVerdict:
+      type: string
+      enum:
+        - accepted
+        - wrong_answer
+        - compilation_error
+        - runtime_error
+        - time_limit_exceeded
+        - memory_limit_exceeded
+        - output_limit_exceeded
+        - checker_error
+        - infrastructure_error
+        - cancelled
     OptionInput:
       type: object
       additionalProperties: false
@@ -697,6 +780,99 @@ components:
           type: integer
         offset:
           type: integer
+    CodeSubmissionInput:
+      type: object
+      additionalProperties: false
+      required: [task_version_id, idempotency_key, language, file]
+      properties:
+        task_version_id: { type: string, format: uuid }
+        idempotency_key: { type: string, format: uuid }
+        language:
+          $ref: "#/components/schemas/ProgrammingLanguage"
+        file:
+          type: string
+          format: binary
+          description: UTF-8 файл до 262144 байт; .py для python или .go для go.
+    ExecutionPhaseResult:
+      type: object
+      required: [stdout, stderr, duration_ms, memory_bytes]
+      properties:
+        exit_code: { type: [integer, "null"] }
+        stdout: { type: string, maxLength: 65536 }
+        stderr: { type: string, maxLength: 65536 }
+        duration_ms: { type: integer, minimum: 0 }
+        memory_bytes: { type: integer, minimum: 0 }
+    ExecutionTestResult:
+      type: object
+      required: [test_id, verdict, stdout, stderr, duration_ms, memory_bytes]
+      properties:
+        test_id: { type: string }
+        verdict:
+          $ref: "#/components/schemas/ExecutionVerdict"
+        stdout: { type: string, maxLength: 65536 }
+        stderr: { type: string, maxLength: 65536 }
+        duration_ms: { type: integer, minimum: 0 }
+        memory_bytes: { type: integer, minimum: 0 }
+    ExecutionFailure:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9_]+$" }
+        message: { type: string, maxLength: 2000 }
+    CodeSubmission:
+      type: object
+      required:
+        - id
+        - user_id
+        - task_id
+        - task_version_id
+        - task_version_number
+        - execution_id
+        - correlation_id
+        - language
+        - source_file_name
+        - status
+        - tests
+        - created_at
+        - updated_at
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        task_id: { type: string, format: uuid }
+        task_version_id: { type: string, format: uuid }
+        task_version_number: { type: integer, minimum: 1 }
+        execution_id: { type: string, format: uuid }
+        correlation_id: { type: string, format: uuid }
+        language:
+          $ref: "#/components/schemas/ProgrammingLanguage"
+        source_file_name: { type: string, maxLength: 255 }
+        status:
+          $ref: "#/components/schemas/CodeSubmissionStatus"
+        verdict:
+          $ref: "#/components/schemas/ExecutionVerdict"
+        compilation:
+          $ref: "#/components/schemas/ExecutionPhaseResult"
+        execution:
+          $ref: "#/components/schemas/ExecutionPhaseResult"
+        tests:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExecutionTestResult"
+        failure:
+          $ref: "#/components/schemas/ExecutionFailure"
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+    CodeSubmissionList:
+      type: object
+      required: [items, limit, offset]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CodeSubmission"
+        limit: { type: integer }
+        offset: { type: integer }
     Error:
       type: object
       required: [code, message]
@@ -738,7 +914,7 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
     ServiceUnavailable:
-      description: PostgreSQL временно недоступен
+      description: PostgreSQL или Kafka временно недоступны
       content:
         application/json:
           schema:

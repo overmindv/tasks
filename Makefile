@@ -18,7 +18,7 @@ test:
 
 ctest: $(GOOSE)
 	$(GOOSE) -dir migrations postgres "$(COMPONENT_TEST_DSN)" up
-	COMPONENT_TEST_DSN="$(COMPONENT_TEST_DSN)" go test -tags=component ./tests/component/...
+	COMPONENT_TEST_DSN="$(COMPONENT_TEST_DSN)" go test -count=1 -tags=component ./tests/component/...
 
 lint: $(GOLANGCI_LINT)
 	$(GOLANGCI_LINT) run
