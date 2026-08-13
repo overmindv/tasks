@@ -29,16 +29,24 @@ func New(tasksService *usecase.TaskService, submissionService *usecase.Submissio
 		logger:      logger,
 	}
 	mux := http.NewServeMux()
+
+	// Liveness и готовность.
 	mux.HandleFunc("GET /health", handler.healthHandler)
 	mux.HandleFunc("GET /ready", handler.readyHandler)
+
+	// Административный CRUD и lifecycle тестов (требует роль admin/superuser).
 	mux.HandleFunc("POST /v1/admin/tasks", handler.createTask)
 	mux.HandleFunc("GET /v1/admin/tasks", handler.listAdminTasks)
 	mux.HandleFunc("GET /v1/admin/tasks/{id}", handler.getAdminTask)
 	mux.HandleFunc("PUT /v1/admin/tasks/{id}", handler.updateTask)
 	mux.HandleFunc("PATCH /v1/admin/tasks/{id}/status", handler.changeTaskStatus)
 	mux.HandleFunc("DELETE /v1/admin/tasks/{id}", handler.deleteTask)
+
+	// Публично доступные тесты (без правильных вариантов).
 	mux.HandleFunc("GET /v1/tasks", handler.listPublishedTasks)
 	mux.HandleFunc("GET /v1/tasks/{id}", handler.getPublishedTask)
+
+	// Пользовательские решения.
 	mux.HandleFunc("POST /v1/tasks/{id}/submissions", handler.submitAnswer)
 	mux.HandleFunc("GET /v1/submissions/{id}", handler.getSubmission)
 	mux.HandleFunc("GET /v1/me/submissions", handler.listMySubmissions)

@@ -4,3 +4,5 @@
 bin
 coverage.out
 .code-review-graph
+.codegraph
+.claude
