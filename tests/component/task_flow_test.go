@@ -47,6 +47,7 @@ type historyPayload struct {
 
 // TestVersionedTaskFlow проверяет полный сценарий создания, решения, обновления и удаления.
 func TestVersionedTaskFlow(t *testing.T) {
+	// Подготовка: DSN, pool, очистка таблиц, HTTP-handler и доверенные ID.
 	dsn := os.Getenv("COMPONENT_TEST_DSN")
 	if dsn == "" {
 		t.Fatal("COMPONENT_TEST_DSN не задан")
@@ -65,6 +66,8 @@ func TestVersionedTaskFlow(t *testing.T) {
 	handler := httpapi.New(usecase.NewTaskService(store), usecase.NewSubmissionService(store), store, logger)
 	adminID := uuid.NewString()
 	userID := uuid.NewString()
+
+	// Фаза 1: создание draft с версией 1.
 	created := componentTaskRequest(t, handler, http.MethodPost, "/v1/admin/tasks", adminID, "admin", map[string]any{
 		"title":      "HTTP status",
 		"statement":  "Какой status означает успех?",
@@ -79,7 +82,11 @@ func TestVersionedTaskFlow(t *testing.T) {
 	if created.Status != "draft" || created.VersionNumber != 1 {
 		t.Fatalf("created task = %#v", created)
 	}
+
+	// Фаза 2: публикация теста.
 	componentTaskRequest(t, handler, http.MethodPatch, "/v1/admin/tasks/"+created.ID+"/status", adminID, "admin", map[string]string{"status": "published"}, http.StatusOK)
+
+	// Фаза 3: неправильный ответ не должен быть accepted.
 	correctV1, wrongV1 := componentOptionIDs(t, created.Options)
 	wrong := componentSubmissionRequest(t, handler, "/v1/tasks/"+created.ID+"/submissions", userID, map[string]any{
 		"task_version_id":     created.TaskVersionID,
@@ -89,6 +96,8 @@ func TestVersionedTaskFlow(t *testing.T) {
 	if wrong.Correct {
 		t.Fatal("неправильный ответ не должен быть accepted")
 	}
+
+	// Фаза 4: обновление создаёт версию 2 и оставляет тест опубликованным.
 	updated := componentTaskRequest(t, handler, http.MethodPut, "/v1/admin/tasks/"+created.ID, adminID, "superuser", map[string]any{
 		"title":      "HTTP status updated",
 		"statement":  "Какой status означает server error?",
@@ -102,6 +111,8 @@ func TestVersionedTaskFlow(t *testing.T) {
 	if updated.VersionNumber != 2 || updated.TaskVersionID == created.TaskVersionID || updated.Status != "published" {
 		t.Fatalf("updated task = %#v", updated)
 	}
+
+	// Фаза 5: правильный ответ по СТАРОЙ версии — корректен с task_updated=true.
 	oldResult := componentSubmissionRequest(t, handler, "/v1/tasks/"+created.ID+"/submissions", userID, map[string]any{
 		"task_version_id":     created.TaskVersionID,
 		"idempotency_key":     uuid.NewString(),
@@ -110,6 +121,8 @@ func TestVersionedTaskFlow(t *testing.T) {
 	if !oldResult.Correct || !oldResult.TaskUpdated || oldResult.LatestTaskVersionID != updated.TaskVersionID {
 		t.Fatalf("old version result = %#v", oldResult)
 	}
+
+	// Фаза 6: правильный ответ по НОВОЙ версии — корректен без task_updated.
 	correctV2, _ := componentOptionIDs(t, updated.Options)
 	newResult := componentSubmissionRequest(t, handler, "/v1/tasks/"+created.ID+"/submissions", userID, map[string]any{
 		"task_version_id":     updated.TaskVersionID,
@@ -119,10 +132,14 @@ func TestVersionedTaskFlow(t *testing.T) {
 	if !newResult.Correct || newResult.TaskUpdated {
 		t.Fatalf("new version result = %#v", newResult)
 	}
+
+	// Фаза 7: история содержит все три решения.
 	history := componentHistoryRequest(t, handler, "/v1/me/submissions?task_id="+created.ID, userID)
 	if len(history.Items) != 3 {
 		t.Fatalf("history length = %d", len(history.Items))
 	}
+
+	// Фаза 8: после soft delete новые решения запрещены, но история остаётся доступной.
 	componentRawRequest(t, handler, http.MethodDelete, "/v1/admin/tasks/"+created.ID, adminID, "admin", nil, http.StatusNoContent)
 	componentRawRequest(t, handler, http.MethodPost, "/v1/tasks/"+created.ID+"/submissions", userID, "", map[string]any{
 		"task_version_id":     updated.TaskVersionID,

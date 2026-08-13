@@ -19,20 +19,27 @@ import (
 
 // main загружает зависимости и запускает внутренний HTTP API tasks-it.
 func main() {
+	// Загрузка конфигурации
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("не удалось загрузить конфигурацию", "error", err)
 		os.Exit(1)
 	}
+
+	// Запуск логгера
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel(cfg.LogLevel)}))
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Запуск БД
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
 		logger.Error("не удалось создать PostgreSQL pool", "error", err)
 		os.Exit(1)
 	}
 	defer pool.Close()
+
+	// Запуск сервиса
 	store := postgresadapter.New(pool)
 	taskService := usecase.NewTaskService(store)
 	submissionService := usecase.NewSubmissionService(store)
@@ -44,8 +51,11 @@ func main() {
 		WriteTimeout:      cfg.WriteTimeout,
 		IdleTimeout:       60 * time.Second,
 	}
+
 	go serve(server, logger, stop, cfg)
 	<-ctx.Done()
+
+	// Graceful Shutdown
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {

@@ -19,13 +19,21 @@
 Требуются Go 1.26.1 и PostgreSQL 17+.
 
 ```bash
+# 1) один раз: конфигурация из .env.example
 cp .env.example .env
-make migrate-up
-set -a && source .env && set +a
-make run
+
+# 2) убедитесь, что PostgreSQL запущен и БД tasks_it создана
+#    (как создать БД — см. docs/development.md)
+
+# 3) миграции + запуск сервиса одной командой
+make dev
 ```
 
-Миграции выполняются отдельно до запуска процесса. Проверка готовности доступна по `GET /ready`, liveness — по `GET /health`.
+Значения из `.env` подхватываются `make` автоматически; ручной `source .env` не нужен. `make dev` сначала применяет миграции, затем запускает сервис. Раздельно: `make migrate-up`, затем `make run`.
+
+Альтернатива без `.env` — передать переменные окружения (`make run DATABASE_URL='…'` или экспортировать их в shell).
+
+Проверка готовности — `GET /ready`, liveness — `GET /health`. Подробный гайд по разработке и добавлению эндпоинтов: [`docs/development.md`](docs/development.md).
 
 ## Проверки
 
@@ -38,6 +46,10 @@ docker build -t tasks-it:local .
 ```
 
 `make ctest` применяет миграции к выделенной тестовой БД и запускает полный HTTP-сценарий. Не направляйте эту команду на общую или production database: тест очищает таблицы `tasks-it`.
+
+## Разработка
+
+Пошаговый гайд «как добавить новый HTTP-эндпоинт» и детали локального запуска: [`docs/development.md`](docs/development.md).
 
 ## Контракты
 

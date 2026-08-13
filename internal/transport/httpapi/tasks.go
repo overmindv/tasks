@@ -10,23 +10,23 @@ import (
 	"github.com/samber/lo"
 )
 
-// createTask создаёт draft теста от имени администратора.
+// Хэндлеры операций с тестами.
+//
+// Административные эндпоинты (/v1/admin/tasks*) требуют доверенную роль admin/superuser
+// (requireAdmin) и возвращают правильные варианты ответа. Пользовательские (/v1/tasks*)
+// доступны любой доверенной личности (requireUser) и никогда не раскрывают is_correct.
+
+// createTask создаёт draft теста от имени администратора. Ответ: 201 + задача.
 func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 	actor, ok := requireAdmin(w, r)
 	if !ok {
 		return
 	}
-	var input taskInput
-	if !decodeJSON(w, r, &input) {
+	input, ok := h.decodeTaskInput(w, r)
+	if !ok {
 		return
 	}
-	domainInput, err := input.domainInput()
-	if err != nil {
-		writeError(w, apperror.New(apperror.ValidationError, "topic_id должен быть UUID", http.StatusBadRequest), h.logger)
-
-		return
-	}
-	result, err := h.tasks.Create(r.Context(), domainInput, actor.UserID)
+	result, err := h.tasks.Create(r.Context(), input, actor.UserID)
 	if err != nil {
 		writeError(w, err, h.logger)
 
@@ -35,7 +35,7 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, responseTask(result, true))
 }
 
-// getAdminTask возвращает текущую версию вместе с правильными вариантами.
+// getAdminTask возвращает текущую версию вместе с правильными вариантами. Ответ: 200.
 func (h *Handler) getAdminTask(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireAdmin(w, r); !ok {
 		return
@@ -53,7 +53,7 @@ func (h *Handler) getAdminTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, responseTask(result, true))
 }
 
-// listAdminTasks возвращает административный список задач.
+// listAdminTasks возвращает административный список задач. Ответ: 200 + список.
 func (h *Handler) listAdminTasks(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireAdmin(w, r); !ok {
 		return
@@ -77,7 +77,7 @@ func (h *Handler) listAdminTasks(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// updateTask создаёт следующую версию теста.
+// updateTask создаёт следующую версию теста. Ответ: 200 + задача.
 func (h *Handler) updateTask(w http.ResponseWriter, r *http.Request) {
 	actor, ok := requireAdmin(w, r)
 	if !ok {
@@ -87,17 +87,11 @@ func (h *Handler) updateTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var input taskInput
-	if !decodeJSON(w, r, &input) {
+	input, ok := h.decodeTaskInput(w, r)
+	if !ok {
 		return
 	}
-	domainInput, err := input.domainInput()
-	if err != nil {
-		writeError(w, apperror.New(apperror.ValidationError, "topic_id должен быть UUID", http.StatusBadRequest), h.logger)
-
-		return
-	}
-	result, err := h.tasks.Update(r.Context(), taskID, domainInput, actor.UserID)
+	result, err := h.tasks.Update(r.Context(), taskID, input, actor.UserID)
 	if err != nil {
 		writeError(w, err, h.logger)
 
@@ -106,7 +100,7 @@ func (h *Handler) updateTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, responseTask(result, true))
 }
 
-// changeTaskStatus выполняет защищённый lifecycle-переход.
+// changeTaskStatus выполняет защищённый lifecycle-переход. Ответ: 200 + задача.
 func (h *Handler) changeTaskStatus(w http.ResponseWriter, r *http.Request) {
 	actor, ok := requireAdmin(w, r)
 	if !ok {
@@ -116,14 +110,8 @@ func (h *Handler) changeTaskStatus(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var input statusInput
-	if !decodeJSON(w, r, &input) {
-		return
-	}
-	status := domain.TaskStatus(input.Status)
-	if status != domain.TaskStatusDraft && status != domain.TaskStatusPublished && status != domain.TaskStatusArchived {
-		writeError(w, apperror.New(apperror.ValidationError, "неподдерживаемый status", http.StatusBadRequest), h.logger)
-
+	status, ok := h.decodeStatusInput(w, r)
+	if !ok {
 		return
 	}
 	result, err := h.tasks.ChangeStatus(r.Context(), taskID, status, actor.UserID)
@@ -135,7 +123,7 @@ func (h *Handler) changeTaskStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, responseTask(result, true))
 }
 
-// deleteTask выполняет soft delete теста.
+// deleteTask выполняет soft delete теста. Ответ: 204 без тела.
 func (h *Handler) deleteTask(w http.ResponseWriter, r *http.Request) {
 	actor, ok := requireAdmin(w, r)
 	if !ok {
@@ -153,7 +141,7 @@ func (h *Handler) deleteTask(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// getPublishedTask возвращает тест без признаков правильного ответа.
+// getPublishedTask возвращает тест без признаков правильного ответа. Ответ: 200.
 func (h *Handler) getPublishedTask(w http.ResponseWriter, r *http.Request) {
 	taskID, ok := pathUUID(w, r, "id")
 	if !ok {
@@ -168,7 +156,7 @@ func (h *Handler) getPublishedTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, responseTask(result, false))
 }
 
-// listPublishedTasks возвращает список опубликованных тестов.
+// listPublishedTasks возвращает список опубликованных тестов. Ответ: 200 + список.
 func (h *Handler) listPublishedTasks(w http.ResponseWriter, r *http.Request) {
 	filter, err := taskFilter(r, false)
 	if err != nil {
@@ -187,6 +175,38 @@ func (h *Handler) listPublishedTasks(w http.ResponseWriter, r *http.Request) {
 		Limit:  filter.Limit,
 		Offset: filter.Offset,
 	})
+}
+
+// decodeTaskInput декодирует taskInput и преобразует его в доменный ввод (400 при ошибке).
+func (h *Handler) decodeTaskInput(w http.ResponseWriter, r *http.Request) (domain.TaskInput, bool) {
+	var input taskInput
+	if !decodeJSON(w, r, &input) {
+		return domain.TaskInput{}, false
+	}
+	domainInput, err := input.domainInput()
+	if err != nil {
+		writeError(w, apperror.New(apperror.ValidationError, "topic_id должен быть UUID", http.StatusBadRequest), h.logger)
+
+		return domain.TaskInput{}, false
+	}
+
+	return domainInput, true
+}
+
+// decodeStatusInput декодирует statusInput и проверяет поддерживаемый статус (400 при ошибке).
+func (h *Handler) decodeStatusInput(w http.ResponseWriter, r *http.Request) (domain.TaskStatus, bool) {
+	var input statusInput
+	if !decodeJSON(w, r, &input) {
+		return "", false
+	}
+	status := domain.TaskStatus(input.Status)
+	if status != domain.TaskStatusDraft && status != domain.TaskStatusPublished && status != domain.TaskStatusArchived {
+		writeError(w, apperror.New(apperror.ValidationError, "неподдерживаемый status", http.StatusBadRequest), h.logger)
+
+		return "", false
+	}
+
+	return status, true
 }
 
 // taskFilter разбирает явные фильтры списка задач.

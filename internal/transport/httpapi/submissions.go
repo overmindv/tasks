@@ -6,10 +6,18 @@ import (
 	"github.com/google/uuid"
 	"github.com/overmindv/tasks-it/internal/apperror"
 	"github.com/overmindv/tasks-it/internal/domain"
+	"github.com/overmindv/tasks-it/internal/usecase"
 	"github.com/samber/lo"
 )
 
-// submitAnswer проверяет и сохраняет ответ текущего пользователя.
+// Хэндлеры пользовательских решений (submissions).
+//
+// Все эндпоинты требуют доверенную личность (requireUser). submitAnswer принимает ответ по
+// конкретной версии теста; getSubmission и listMySubmissions отдают результат только владельцу
+// (либо администратору в случае getSubmission). Публичные эндпоинты не раскрывают is_correct
+// до сохранения решения.
+
+// submitAnswer проверяет и сохраняет ответ текущего пользователя. Ответ: 201 + результат.
 func (h *Handler) submitAnswer(w http.ResponseWriter, r *http.Request) {
 	actor, ok := requireUser(w, r)
 	if !ok {
@@ -19,17 +27,11 @@ func (h *Handler) submitAnswer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var input submissionInput
-	if !decodeJSON(w, r, &input) {
+	input, ok := h.decodeSubmissionInput(w, r)
+	if !ok {
 		return
 	}
-	domainInput, err := input.domainSubmissionInput()
-	if err != nil {
-		writeError(w, apperror.New(apperror.ValidationError, "version, idempotency key и options должны быть UUID", http.StatusBadRequest), h.logger)
-
-		return
-	}
-	result, err := h.submissions.Submit(r.Context(), taskID, actor.UserID, domainInput)
+	result, err := h.submissions.Submit(r.Context(), taskID, actor.UserID, input)
 	if err != nil {
 		writeError(w, err, h.logger)
 
@@ -38,7 +40,7 @@ func (h *Handler) submitAnswer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, responseSubmission(result))
 }
 
-// getSubmission возвращает конкретный результат владельцу или администратору.
+// getSubmission возвращает конкретный результат владельцу или администратору. Ответ: 200.
 func (h *Handler) getSubmission(w http.ResponseWriter, r *http.Request) {
 	actor, ok := requireUser(w, r)
 	if !ok {
@@ -57,7 +59,7 @@ func (h *Handler) getSubmission(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, responseSubmission(result))
 }
 
-// listMySubmissions возвращает историю решений текущего пользователя.
+// listMySubmissions возвращает историю решений текущего пользователя. Ответ: 200 + список.
 func (h *Handler) listMySubmissions(w http.ResponseWriter, r *http.Request) {
 	actor, ok := requireUser(w, r)
 	if !ok {
@@ -96,4 +98,20 @@ func (h *Handler) listMySubmissions(w http.ResponseWriter, r *http.Request) {
 		Limit:  limit,
 		Offset: offset,
 	})
+}
+
+// decodeSubmissionInput декодирует submissionInput и преобразует его в use-case ввод (400 при ошибке).
+func (h *Handler) decodeSubmissionInput(w http.ResponseWriter, r *http.Request) (usecase.SubmitInput, bool) {
+	var input submissionInput
+	if !decodeJSON(w, r, &input) {
+		return usecase.SubmitInput{}, false
+	}
+	domainInput, err := input.domainSubmissionInput()
+	if err != nil {
+		writeError(w, apperror.New(apperror.ValidationError, "version, idempotency key и options должны быть UUID", http.StatusBadRequest), h.logger)
+
+		return usecase.SubmitInput{}, false
+	}
+
+	return domainInput, true
 }
