@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/overmindv/tasks-it/internal/usecase"
+	"github.com/overmindv/tasks/internal/usecase"
 )
 
 type healthChecker interface {

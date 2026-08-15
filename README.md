@@ -1,6 +1,6 @@
-# tasks-it
+# tasks
 
-`tasks-it` — внутренний сервис Overmindv для создания, публикации и решения IT-тестов. Первый MVP поддерживает `single_choice` и `multiple_choice`, неизменяемые версии условий и историю пользовательских решений.
+`tasks` — внутренний сервис Overmindv для создания, публикации и решения IT-тестов. Первый MVP поддерживает `single_choice` и `multiple_choice`, неизменяемые версии условий и историю пользовательских решений.
 
 ## Возможности
 
@@ -12,7 +12,7 @@
 - необязательная связь версии с `topic_id` из `entities`;
 - внутренний HTTP/JSON API без GraphQL и выполнения пользовательского кода.
 
-Правильные варианты доступны только административному API и пользователю после сохранения решения. `tasks-it` не хранит профили пользователей и не обращается к БД других сервисов.
+Правильные варианты доступны только административному API и пользователю после сохранения решения. `tasks` не хранит профили пользователей и не обращается к БД других сервисов.
 
 ## Локальный запуск
 
@@ -22,7 +22,7 @@
 # 1) один раз: конфигурация из .env.example
 cp .env.example .env
 
-# 2) убедитесь, что PostgreSQL запущен и БД tasks_it создана
+# 2) убедитесь, что PostgreSQL запущен и БД tasks создана
 #    (как создать БД — см. docs/development.md)
 
 # 3) миграции + запуск сервиса одной командой
@@ -41,11 +41,11 @@ make dev
 make test
 go vet ./...
 make lint
-make ctest COMPONENT_TEST_DSN='postgres://postgres:postgres@localhost:5432/tasks_it?sslmode=disable'
-docker build -t tasks-it:local .
+make ctest COMPONENT_TEST_DSN='postgres://postgres:postgres@localhost:5432/tasks?sslmode=disable'
+docker build -t tasks:local .
 ```
 
-`make ctest` применяет миграции к выделенной тестовой БД и запускает полный HTTP-сценарий. Не направляйте эту команду на общую или production database: тест очищает таблицы `tasks-it`.
+`make ctest` применяет миграции к выделенной тестовой БД и запускает полный HTTP-сценарий. Не направляйте эту команду на общую или production database: тест очищает таблицы `tasks`.
 
 ## Разработка
 

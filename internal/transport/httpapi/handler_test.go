@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/overmindv/tasks-it/internal/domain"
-	"github.com/overmindv/tasks-it/internal/repository"
-	"github.com/overmindv/tasks-it/internal/usecase"
+	"github.com/overmindv/tasks/internal/domain"
+	"github.com/overmindv/tasks/internal/repository"
+	"github.com/overmindv/tasks/internal/usecase"
 )
 
 type handlerRepository struct {

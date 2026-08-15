@@ -11,13 +11,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	postgresadapter "github.com/overmindv/tasks-it/internal/adapter/postgres"
-	"github.com/overmindv/tasks-it/internal/config"
-	"github.com/overmindv/tasks-it/internal/transport/httpapi"
-	"github.com/overmindv/tasks-it/internal/usecase"
+	postgresadapter "github.com/overmindv/tasks/internal/adapter/postgres"
+	"github.com/overmindv/tasks/internal/config"
+	"github.com/overmindv/tasks/internal/transport/httpapi"
+	"github.com/overmindv/tasks/internal/usecase"
 )
 
-// main загружает зависимости и запускает внутренний HTTP API tasks-it.
+// main загружает зависимости и запускает внутренний HTTP API tasks.
 func main() {
 	// Загрузка конфигурации
 	cfg, err := config.Load()
@@ -65,7 +65,7 @@ func main() {
 
 // serve запускает сервер и останавливает приложение при неожиданной ошибке.
 func serve(server *http.Server, logger *slog.Logger, stop context.CancelFunc, cfg config.Config) {
-	logger.Info("tasks-it запущен", "address", cfg.HTTPAddress, "environment", cfg.Environment)
+	logger.Info("tasks запущен", "address", cfg.HTTPAddress, "environment", cfg.Environment)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("HTTP-сервер завершился с ошибкой", "error", err)
 		stop()

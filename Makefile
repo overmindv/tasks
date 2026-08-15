@@ -2,7 +2,7 @@ LOCAL_BIN := $(CURDIR)/bin
 GOOSE := $(LOCAL_BIN)/goose
 JET := $(LOCAL_BIN)/jet
 GOLANGCI_LINT := $(LOCAL_BIN)/golangci-lint
-DATABASE_URL ?= postgres://postgres:postgres@localhost:5432/tasks_it?sslmode=disable
+DATABASE_URL ?= postgres://postgres:postgres@localhost:5432/tasks?sslmode=disable
 COMPONENT_TEST_DSN ?= $(DATABASE_URL)
 
 # Автоматически подхватываем локальный .env (KEY=value), чтобы не выполнять
@@ -17,12 +17,12 @@ endif
 .PHONY: dev run build test ctest lint migrate-up migrate-down jet-generate tidy
 
 # dev — главный локальный таргет: применяет миграции и запускает сервис.
-# Требует запущенного PostgreSQL с созданной БД tasks_it (см. docs/development.md).
+# Требует запущенного PostgreSQL с созданной БД tasks (см. docs/development.md).
 dev: migrate-up run
 
 # run — запускает HTTP API; конфигурация берётся из .env.
 run:
-	go run ./cmd/tasks-it
+	go run ./cmd/tasks
 
 # build — проверяет, что весь проект компилируется.
 build:

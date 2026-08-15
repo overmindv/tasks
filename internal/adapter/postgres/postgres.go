@@ -11,8 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/overmindv/tasks-it/internal/apperror"
-	"github.com/overmindv/tasks-it/internal/repository"
+	"github.com/overmindv/tasks/internal/apperror"
+	"github.com/overmindv/tasks/internal/repository"
 )
 
 type querier interface {

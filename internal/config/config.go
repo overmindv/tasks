@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	defaultServiceName  = "tasks-it"
+	defaultServiceName  = "tasks"
 	defaultHTTPAddress  = ":8080"
 	defaultLogLevel     = "info"
 	defaultEnvironment  = "local"
