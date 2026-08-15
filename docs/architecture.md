@@ -1,8 +1,8 @@
-# Архитектура tasks-it
+# Архитектура tasks
 
 ## Граница сервиса
 
-`tasks-it` владеет тестовыми задачами, их версиями, вариантами ответа и пользовательскими решениями.
+`tasks` владеет тестовыми задачами, их версиями, вариантами ответа и пользовательскими решениями.
 
 Пользователи принадлежат `users`, канонические темы — `entities`, GraphQL API — `api-gateway`, представление — `frontend`.
 
@@ -16,7 +16,7 @@
 - `internal/repository` — storage contract;
 - `internal/adapter/postgres` — типизированные Jet-запросы поверх pgx;
 - `internal/transport/httpapi` — DTO, HTTP routing, trusted actor boundary;
-- `cmd/tasks-it` — wiring, сигналы и lifecycle процесса.
+- `cmd/tasks` — wiring, сигналы и lifecycle процесса.
 
 Transport DTO не используются как доменные или PostgreSQL-модели. Все SQL-операции строятся Jet expressions, входные значения параметризуются.
 

@@ -7,8 +7,8 @@ import (
 	jet "github.com/go-jet/jet/v2/postgres"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/overmindv/tasks-it/internal/apperror"
-	"github.com/overmindv/tasks-it/internal/domain"
+	"github.com/overmindv/tasks/internal/apperror"
+	"github.com/overmindv/tasks/internal/domain"
 	"github.com/samber/lo"
 )
 

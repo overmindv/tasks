@@ -1,4 +1,4 @@
-module github.com/overmindv/tasks-it
+module github.com/overmindv/tasks
 
 go 1.26.1
 

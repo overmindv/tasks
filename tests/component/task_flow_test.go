@@ -15,9 +15,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	postgresadapter "github.com/overmindv/tasks-it/internal/adapter/postgres"
-	"github.com/overmindv/tasks-it/internal/transport/httpapi"
-	"github.com/overmindv/tasks-it/internal/usecase"
+	postgresadapter "github.com/overmindv/tasks/internal/adapter/postgres"
+	"github.com/overmindv/tasks/internal/transport/httpapi"
+	"github.com/overmindv/tasks/internal/usecase"
 )
 
 type taskPayload struct {

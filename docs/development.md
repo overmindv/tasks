@@ -1,4 +1,4 @@
-# Разработка tasks-it
+# Разработка tasks
 
 Гайд для разработчиков: локальный запуск и добавление новых HTTP-эндпоинтов.
 
@@ -23,11 +23,11 @@ cp .env.example .env
 Убедитесь, что PostgreSQL запущен, и создайте БД, если её ещё нет:
 
 ```bash
-createdb tasks_it
+createdb tasks
 ```
 
 Если вы используете другой пользователь/хост/имя, укажите их в `DATABASE_URL` в `.env`
-(формат `postgres://user:password@host:5432/tasks_it?sslmode=disable`).
+(формат `postgres://user:password@host:5432/tasks?sslmode=disable`).
 
 ### 3. Запуск
 

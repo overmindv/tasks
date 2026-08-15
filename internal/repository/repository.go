@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/overmindv/tasks-it/internal/domain"
+	"github.com/overmindv/tasks/internal/domain"
 )
 
 // Repository задаёт операции хранения задач и пользовательских решений.

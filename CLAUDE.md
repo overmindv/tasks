@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository
 
-`tasks-it` — внутренний Go-сервис Overmindv для IT-тестов: административный CRUD задач, неизменяемое версионирование условий, публикация и проверка пользовательских решений. Первый MVP поддерживает `single_choice` и `multiple_choice`. Это сервис внутренней сети, не публикуется наружу.
+`tasks` — внутренний Go-сервис Overmindv для IT-тестов: административный CRUD задач, неизменяемое версионирование условий, публикация и проверка пользовательских решений. Первый MVP поддерживает `single_choice` и `multiple_choice`. Это сервис внутренней сети, не публикуется наружу.
 
 **Важно:** проект имеет подробный `AGENTS.md` (правила слоёв, версионирование, безопасность, чекеры, миграции, Go-конвенции). Он обязателен к прочтению перед изменениями границ сервиса и при нетривиальных задачах — не дублируется здесь.
 
@@ -15,7 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 cp .env.example .env                              # один раз; .env подхватывается make автоматически
 make dev                                          # goose-миграции + запуск сервиса одной командой
-make run                                          # только запуск (go run ./cmd/tasks-it)
+make run                                          # только запуск (go run ./cmd/tasks)
 make migrate-up                                   # только миграции, если БД уже поднята
 
 make build                                        # go build ./...
@@ -24,8 +24,8 @@ go vet ./...
 make lint                                         # golangci-lint run (gofmt/goimports/staticcheck и др.)
 go test ./<package>/...                           # тесты одного пакета
 
-# component-тесты (применяют миграции к ВЫДЕЛЕННОЙ тестовой БД, очищают таблицы tasks-it)
-make ctest COMPONENT_TEST_DSN='postgres://postgres:postgres@localhost:5432/tasks_it?sslmode=disable'
+# component-тесты (применяют миграции к ВЫДЕЛЕННОЙ тестовой БД, очищают таблицы tasks)
+make ctest COMPONENT_TEST_DSN='postgres://postgres:postgres@localhost:5432/tasks?sslmode=disable'
 ```
 
 `make jet-generate` перегенерирует типизированные Jet-модели в `internal/adapter/postgres/generated` из live-schema БД (нужен поднятый PostgreSQL). `.env` и БД-соединения — в `.gitingore`, в репозиторий не коммитятся.
@@ -36,7 +36,7 @@ make ctest COMPONENT_TEST_DSN='postgres://postgres:postgres@localhost:5432/tasks
 
 Чистая гексагональная слоёность; поток: transport → usecase → repository interface → postgres adapter.
 
-- `cmd/tasks-it` — wiring (config, pgxpool, логгер, graceful shutdown) и точка входа.
+- `cmd/tasks` — wiring (config, pgxpool, логгер, graceful shutdown) и точка входа.
 - `internal/domain` — типы и **инварианты** (`task.go`, `submission.go`): lifecycle `draft → published → archived → draft`, версионирование, лимиты полей, валидация вариантов по типу теста. Бизнес-инварианты проверяются здесь/usecase, не в transport.
 - `internal/checker` — детерминированное сравнение ответов (`Choice`: множества UUID), без состояния.
 - `internal/usecase` — оркестрация сценариев и транзакции. `TaskService` (CRUD, status, версии), `SubmissionService` (проверка прав, идемпотентность, запись результата одной транзакцией). Boundary транзакций — здесь (`Repository.WithinTransaction`).

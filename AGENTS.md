@@ -2,11 +2,11 @@
 
 ## Repository identity
 
-The repository name is `tasks-it`.
+The repository name is `tasks`.
 
 ## Service purpose
 
-`tasks-it` owns programming and other IT-related tasks in the Overmindv
+`tasks` owns programming and other IT-related tasks in the Overmindv
 platform.
 
 Examples include:
@@ -51,7 +51,7 @@ A task may contain:
 
 ## Platform boundaries
 
-`tasks-it` is the source of truth for IT task definitions and task-specific
+`tasks` is the source of truth for IT task definitions and task-specific
 validation configuration.
 
 It does not own:
@@ -83,7 +83,7 @@ documented consistency requirement requires them.
 
 ## Ownership model
 
-`tasks-it` owns:
+`tasks` owns:
 
 * task definitions;
 * task versions;
@@ -489,8 +489,8 @@ Before changing a contract:
 
 1. locate its producers and consumers;
 2. inspect the impact through code-review-graph and repository search;
-3. check compatibility with `laserbeak`;
-4. check compatibility with `soundwave` when relevant;
+3. check compatibility with `api-gateway`;
+4. check compatibility with `frontend` when relevant;
 5. update generated code;
 6. update contract tests;
 7. document coordinated deployment requirements.

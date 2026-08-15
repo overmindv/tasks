@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/overmindv/tasks-it/internal/apperror"
-	"github.com/overmindv/tasks-it/internal/checker"
-	"github.com/overmindv/tasks-it/internal/domain"
-	"github.com/overmindv/tasks-it/internal/repository"
+	"github.com/overmindv/tasks/internal/apperror"
+	"github.com/overmindv/tasks/internal/checker"
+	"github.com/overmindv/tasks/internal/domain"
+	"github.com/overmindv/tasks/internal/repository"
 	"github.com/samber/lo"
 )
 

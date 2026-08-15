@@ -1,10 +1,10 @@
 openapi: 3.1.0
 info:
-  title: tasks-it internal API
+  title: tasks internal API
   version: 1.0.0
   description: Внутренний HTTP API тестовых IT-задач Overmindv.
 servers:
-  - url: http://tasks-it:8080
+  - url: http://tasks:8080
 paths:
   /health:
     get:

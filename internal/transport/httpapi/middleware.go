@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/overmindv/tasks-it/internal/apperror"
+	"github.com/overmindv/tasks/internal/apperror"
 )
 
 const requestIDHeader = "X-Request-ID"

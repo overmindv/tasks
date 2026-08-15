@@ -1,4 +1,4 @@
-name: Tasks-IT CI
+name: Tasks CI
 
 on:
   pull_request:
@@ -49,16 +49,16 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: tasks_it
+          POSTGRES_DB: tasks
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d tasks_it"
+          --health-cmd "pg_isready -U postgres -d tasks"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
     env:
-      COMPONENT_TEST_DSN: postgres://postgres:postgres@localhost:5432/tasks_it?sslmode=disable
+      COMPONENT_TEST_DSN: postgres://postgres:postgres@localhost:5432/tasks?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
