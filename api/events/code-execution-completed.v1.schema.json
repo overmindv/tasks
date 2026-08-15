@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://overmindv.local/schemas/code-execution-completed.v1.schema.json",
+  "title": "code_execution.completed v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "occurred_at",
+    "correlation_id",
+    "submission_id",
+    "execution_id",
+    "task_id",
+    "task_version_id",
+    "verdict",
+    "tests"
+  ],
+  "$defs": {
+    "verdict": {
+      "enum": [
+        "accepted",
+        "wrong_answer",
+        "compilation_error",
+        "runtime_error",
+        "time_limit_exceeded",
+        "memory_limit_exceeded",
+        "output_limit_exceeded",
+        "checker_error",
+        "infrastructure_error",
+        "cancelled"
+      ]
+    },
+    "phase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stdout", "stderr", "duration_ms", "memory_bytes"],
+      "properties": {
+        "exit_code": { "type": "integer" },
+        "stdout": { "type": "string", "maxLength": 65536 },
+        "stderr": { "type": "string", "maxLength": 65536 },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "memory_bytes": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "properties": {
+    "event_id": { "type": "string", "format": "uuid" },
+    "event_type": { "const": "code_execution.completed" },
+    "schema_version": { "const": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "correlation_id": { "type": "string", "format": "uuid" },
+    "submission_id": { "type": "string", "format": "uuid" },
+    "execution_id": { "type": "string", "format": "uuid" },
+    "task_id": { "type": "string", "format": "uuid" },
+    "task_version_id": { "type": "string", "format": "uuid" },
+    "verdict": { "$ref": "#/$defs/verdict" },
+    "compilation": { "$ref": "#/$defs/phase" },
+    "execution": { "$ref": "#/$defs/phase" },
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["test_id", "verdict", "stdout", "stderr", "duration_ms", "memory_bytes"],
+        "properties": {
+          "test_id": { "type": "string", "minLength": 1 },
+          "verdict": { "$ref": "#/$defs/verdict" },
+          "stdout": { "type": "string", "maxLength": 65536 },
+          "stderr": { "type": "string", "maxLength": 65536 },
+          "duration_ms": { "type": "integer", "minimum": 0 },
+          "memory_bytes": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "maxLength": 2000 }
+      }
+    }
+  }
+}

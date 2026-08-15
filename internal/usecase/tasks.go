@@ -45,8 +45,15 @@ func (s *TaskService) Create(ctx context.Context, input domain.TaskInput, actorI
 		if err := tx.InsertTaskVersion(ctx, version); err != nil {
 			return fmt.Errorf("insert task version: %w", err)
 		}
-		if err := tx.InsertTaskOptions(ctx, version.Options); err != nil {
-			return fmt.Errorf("insert task options: %w", err)
+		if len(version.Options) > 0 {
+			if err := tx.InsertTaskOptions(ctx, version.Options); err != nil {
+				return fmt.Errorf("insert task options: %w", err)
+			}
+		}
+		if hasExtendedContent(version) {
+			if err := tx.InsertTaskContent(ctx, version); err != nil {
+				return fmt.Errorf("insert task content: %w", err)
+			}
 		}
 		if err := tx.SetCurrentTaskVersion(ctx, taskID, versionID, actorID); err != nil {
 			return fmt.Errorf("set current task version: %w", err)
@@ -79,12 +86,35 @@ func (s *TaskService) Update(ctx context.Context, taskID uuid.UUID, input domain
 		if err != nil {
 			return fmt.Errorf("get current task version: %w", err)
 		}
+		// Обычная admin-форма пока редактирует только общие поля задачи. Сохраняем
+		// programming-содержимое, которое она не передаёт, чтобы новая версия не теряла данные.
+		if input.TaskType == domain.TaskTypeProgramming {
+			if len(input.Tags) == 0 {
+				input.Tags = current.Tags
+			}
+			if len(input.Examples) == 0 {
+				input.Examples = current.Examples
+			}
+			if len(input.Constraints) == 0 {
+				input.Constraints = current.Constraints
+			}
+			if input.Source == nil {
+				input.Source = current.Source
+			}
+		}
 		version := buildVersion(taskID, uuid.New(), current.VersionNumber+1, input, actorID)
 		if err := tx.InsertTaskVersion(ctx, version); err != nil {
 			return fmt.Errorf("insert next task version: %w", err)
 		}
-		if err := tx.InsertTaskOptions(ctx, version.Options); err != nil {
-			return fmt.Errorf("insert next task options: %w", err)
+		if len(version.Options) > 0 {
+			if err := tx.InsertTaskOptions(ctx, version.Options); err != nil {
+				return fmt.Errorf("insert next task options: %w", err)
+			}
+		}
+		if hasExtendedContent(version) {
+			if err := tx.InsertTaskContent(ctx, version); err != nil {
+				return fmt.Errorf("insert next task content: %w", err)
+			}
 		}
 		if err := tx.SetCurrentTaskVersion(ctx, taskID, version.ID, actorID); err != nil {
 			return fmt.Errorf("set next current task version: %w", err)
@@ -97,6 +127,11 @@ func (s *TaskService) Update(ctx context.Context, taskID uuid.UUID, input domain
 	}
 
 	return s.GetAdmin(ctx, taskID)
+}
+
+// hasExtendedContent сообщает, нужно ли сохранять дополнительные таблицы версии.
+func hasExtendedContent(version domain.TaskVersion) bool {
+	return len(version.Tags) > 0 || len(version.Examples) > 0 || len(version.Constraints) > 0 || version.Source != nil
 }
 
 // GetAdmin возвращает текущую версию теста для административного API.
@@ -203,6 +238,10 @@ func buildVersion(taskID, versionID uuid.UUID, number int, input domain.TaskInpu
 		Difficulty:    input.Difficulty,
 		CreatedBy:     actorID,
 		Options:       options,
+		Tags:          input.Tags,
+		Examples:      input.Examples,
+		Constraints:   input.Constraints,
+		Source:        input.Source,
 	}
 }
 

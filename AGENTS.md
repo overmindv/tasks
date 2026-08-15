@@ -71,7 +71,7 @@ Related Overmindv services:
 * `media`: files, images and other media;
 * `api-gateway`: GraphQL API gateway;
 * `frontend`: web frontend;
-* `infra`: Docker, Kubernetes and shared infrastructure.
+* `infra`: Docker and shared infrastructure.
 
 Store external entity identifiers as opaque IDs.
 

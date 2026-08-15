@@ -36,7 +36,7 @@ test:
 # и гоняет полный HTTP-сценарий. Не направляйте на общую/production database.
 ctest: $(GOOSE)
 	$(GOOSE) -dir migrations postgres "$(COMPONENT_TEST_DSN)" up
-	COMPONENT_TEST_DSN="$(COMPONENT_TEST_DSN)" go test -tags=component ./tests/component/...
+	COMPONENT_TEST_DSN="$(COMPONENT_TEST_DSN)" go test -count=1 -tags=component ./tests/component/...
 
 # lint — статический анализ (gofmt, goimports, staticcheck и др.).
 lint: $(GOLANGCI_LINT)
