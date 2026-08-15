@@ -8,14 +8,19 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	postgresadapter "github.com/overmindv/tasks/internal/adapter/postgres"
+	"github.com/overmindv/tasks/internal/domain"
+	"github.com/overmindv/tasks/internal/execution"
 	"github.com/overmindv/tasks/internal/transport/httpapi"
 	"github.com/overmindv/tasks/internal/usecase"
 )
@@ -45,6 +50,16 @@ type historyPayload struct {
 	Items []submissionPayload `json:"items"`
 }
 
+type codeSubmissionPayload struct {
+	ID            string `json:"id"`
+	ExecutionID   string `json:"execution_id"`
+	CorrelationID string `json:"correlation_id"`
+	TaskID        string `json:"task_id"`
+	TaskVersionID string `json:"task_version_id"`
+	Status        string `json:"status"`
+	Verdict       string `json:"verdict"`
+}
+
 // TestVersionedTaskFlow проверяет полный сценарий создания, решения, обновления и удаления.
 func TestVersionedTaskFlow(t *testing.T) {
 	// Подготовка: DSN, pool, очистка таблиц, HTTP-handler и доверенные ID.
@@ -58,12 +73,25 @@ func TestVersionedTaskFlow(t *testing.T) {
 		t.Fatalf("pgxpool.New() error = %v", err)
 	}
 	defer pool.Close()
-	if _, err := pool.Exec(ctx, "TRUNCATE submission_answers, submissions, task_options, task_versions, tasks CASCADE"); err != nil {
+	if _, err := pool.Exec(ctx, "TRUNCATE code_execution_result_inbox, code_submission_outbox, code_submissions, submission_answers, submissions, task_options, task_versions, tasks CASCADE"); err != nil {
 		t.Fatalf("truncate component database: %v", err)
 	}
 	store := postgresadapter.New(pool)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	handler := httpapi.New(usecase.NewTaskService(store), usecase.NewSubmissionService(store), store, logger)
+	codeService := usecase.NewCodeSubmissionService(store, usecase.CodeExecutionPolicy{
+		RequestsTopic:    "code-execution.requests.v1",
+		TimeLimit:        time.Second,
+		MemoryLimitBytes: 64 * 1024 * 1024,
+	})
+	handler := httpapi.New(
+		usecase.NewTaskService(store),
+		usecase.NewSubmissionService(store),
+		codeService,
+		usecase.NewCandidateService(store),
+		store,
+		logger,
+		"component-ingest-token",
+	)
 	adminID := uuid.NewString()
 	userID := uuid.NewString()
 
@@ -138,8 +166,86 @@ func TestVersionedTaskFlow(t *testing.T) {
 	if len(history.Items) != 3 {
 		t.Fatalf("history length = %d", len(history.Items))
 	}
-
-	// Фаза 8: после soft delete новые решения запрещены, но история остаётся доступной.
+	programming := componentTaskRequest(t, handler, http.MethodPost, "/v1/admin/tasks", adminID, "admin", map[string]any{
+		"title":       "Echo",
+		"statement":   "Выведите входную строку",
+		"task_type":   "programming",
+		"difficulty":  "easy",
+		"options":     []any{},
+		"tags":        []string{"stdin"},
+		"constraints": []string{"1 <= length <= 100"},
+		"examples": []map[string]any{
+			{"input": "hello", "output": "hello", "explanation": "echo"},
+		},
+	}, http.StatusCreated)
+	componentTaskRequest(t, handler, http.MethodPatch, "/v1/admin/tasks/"+programming.ID+"/status", adminID, "admin", map[string]string{"status": "published"}, http.StatusOK)
+	code := componentCodeSubmissionRequest(t, handler, programming, userID)
+	if code.Status != "queued" || code.Verdict != "" {
+		t.Fatalf("queued code submission = %#v", code)
+	}
+	var requestPayload string
+	if err := pool.QueryRow(ctx, "SELECT payload FROM code_submission_outbox WHERE aggregate_id = $1", code.ID).Scan(&requestPayload); err != nil {
+		t.Fatalf("query outbox payload: %v", err)
+	}
+	var requestEvent execution.RequestEvent
+	if err := json.Unmarshal([]byte(requestPayload), &requestEvent); err != nil {
+		t.Fatalf("decode outbox request event: %v", err)
+	}
+	if requestEvent.Language != domain.ProgrammingLanguagePython || len(requestEvent.Tests) != 1 || requestEvent.Tests[0].Visibility != execution.TestVisibilityOpen {
+		t.Fatalf("request event = %#v", requestEvent)
+	}
+	claimToken := uuid.New()
+	claimed, err := store.ClaimOutboxMessages(ctx, 10, claimToken, time.Now().UTC().Add(time.Minute))
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("ClaimOutboxMessages() = %d, %v", len(claimed), err)
+	}
+	if err := store.MarkOutboxPublished(ctx, claimed[0].ID, claimToken); err != nil {
+		t.Fatalf("MarkOutboxPublished() error = %v", err)
+	}
+	var sourceCleared bool
+	var payloadCleared bool
+	if err := pool.QueryRow(ctx, `
+		SELECT cs.source_code IS NULL, o.payload IS NULL
+		FROM code_submissions cs
+		INNER JOIN code_submission_outbox o ON o.aggregate_id = cs.id
+		WHERE cs.id = $1`, code.ID).Scan(&sourceCleared, &payloadCleared); err != nil {
+		t.Fatalf("query cleared source payload: %v", err)
+	}
+	if !sourceCleared || !payloadCleared {
+		t.Fatalf("sourceCleared=%v payloadCleared=%v", sourceCleared, payloadCleared)
+	}
+	resultEvent := execution.ResultEvent{
+		EventID:       uuid.New(),
+		EventType:     execution.ResultEventType,
+		SchemaVersion: execution.SchemaVersion,
+		OccurredAt:    time.Now().UTC(),
+		CorrelationID: uuid.MustParse(code.CorrelationID),
+		SubmissionID:  uuid.MustParse(code.ID),
+		ExecutionID:   uuid.MustParse(code.ExecutionID),
+		TaskID:        uuid.MustParse(code.TaskID),
+		TaskVersionID: uuid.MustParse(code.TaskVersionID),
+		Verdict:       domain.ExecutionVerdictAccepted,
+		Tests: []domain.ExecutionTestResult{
+			{TestID: "open-1", Verdict: domain.ExecutionVerdictAccepted, Stdout: "hello"},
+		},
+	}
+	if err := codeService.HandleResult(ctx, usecase.ExecutionMessageMetadata{
+		Topic:         "code-execution.results.v1",
+		Partition:     0,
+		Offset:        1,
+		PayloadSHA256: strings.Repeat("a", 64),
+	}, resultEvent); err != nil {
+		t.Fatalf("HandleResult() error = %v", err)
+	}
+	completedResponse := componentRawRequest(t, handler, http.MethodGet, "/v1/code-submissions/"+code.ID, userID, "", nil, http.StatusOK)
+	var completed codeSubmissionPayload
+	if err := json.NewDecoder(completedResponse.Body).Decode(&completed); err != nil {
+		t.Fatalf("decode completed code submission: %v", err)
+	}
+	if completed.Status != "completed" || completed.Verdict != "accepted" {
+		t.Fatalf("completed code submission = %#v", completed)
+	}
+	componentRawRequest(t, handler, http.MethodGet, "/v1/code-submissions/"+code.ID, uuid.NewString(), "", nil, http.StatusForbidden)
 	componentRawRequest(t, handler, http.MethodDelete, "/v1/admin/tasks/"+created.ID, adminID, "admin", nil, http.StatusNoContent)
 	componentRawRequest(t, handler, http.MethodPost, "/v1/tasks/"+created.ID+"/submissions", userID, "", map[string]any{
 		"task_version_id":     updated.TaskVersionID,
@@ -147,6 +253,46 @@ func TestVersionedTaskFlow(t *testing.T) {
 		"selected_option_ids": []string{correctV2},
 	}, http.StatusNotFound)
 	componentRawRequest(t, handler, http.MethodGet, "/v1/submissions/"+oldResult.ID, userID, "", nil, http.StatusOK)
+}
+
+// componentCodeSubmissionRequest отправляет multipart-файл и декодирует queued запуск.
+func componentCodeSubmissionRequest(t *testing.T, handler http.Handler, task taskPayload, userID string) codeSubmissionPayload {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("task_version_id", task.TaskVersionID); err != nil {
+		t.Fatalf("write task_version_id: %v", err)
+	}
+	if err := writer.WriteField("idempotency_key", uuid.NewString()); err != nil {
+		t.Fatalf("write idempotency_key: %v", err)
+	}
+	if err := writer.WriteField("language", "python"); err != nil {
+		t.Fatalf("write language: %v", err)
+	}
+	file, err := writer.CreateFormFile("file", "main.py")
+	if err != nil {
+		t.Fatalf("create source form file: %v", err)
+	}
+	if _, err := file.Write([]byte("print(input())")); err != nil {
+		t.Fatalf("write source form file: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/tasks/"+task.ID+"/code-submissions", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.Header.Set("X-User-ID", userID)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("code submission status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var payload codeSubmissionPayload
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode code submission response: %v", err)
+	}
+
+	return payload
 }
 
 // componentOptionIDs возвращает правильный и неправильный option ID admin-ответа.

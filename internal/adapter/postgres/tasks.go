@@ -150,6 +150,10 @@ func (r *Postgres) GetTaskVersion(ctx context.Context, taskID, versionID uuid.UU
 		return domain.TaskVersion{}, fmt.Errorf("list version options: %w", err)
 	}
 	version.Options = options[version.ID]
+	versions := map[uuid.UUID]*domain.TaskVersion{version.ID: &version}
+	if err := r.hydrateTaskContent(ctx, versions); err != nil {
+		return domain.TaskVersion{}, fmt.Errorf("load version content: %w", err)
+	}
 
 	return version, nil
 }
@@ -237,6 +241,13 @@ func (r *Postgres) ListTaskDetails(ctx context.Context, filter domain.TaskFilter
 	}
 	for index := range items {
 		items[index].Version.Options = options[items[index].Version.ID]
+	}
+	versions := make(map[uuid.UUID]*domain.TaskVersion, len(items))
+	for index := range items {
+		versions[items[index].Version.ID] = &items[index].Version
+	}
+	if err := r.hydrateTaskContent(ctx, versions); err != nil {
+		return nil, fmt.Errorf("load task content: %w", err)
 	}
 
 	return items, nil

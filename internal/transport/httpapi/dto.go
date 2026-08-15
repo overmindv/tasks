@@ -10,12 +10,29 @@ import (
 )
 
 type taskInput struct {
-	TopicID    *string       `json:"topic_id"`
-	Title      string        `json:"title"`
-	Statement  string        `json:"statement"`
-	TaskType   string        `json:"task_type"`
-	Difficulty string        `json:"difficulty"`
-	Options    []optionInput `json:"options"`
+	TopicID     *string        `json:"topic_id"`
+	Title       string         `json:"title"`
+	Statement   string         `json:"statement"`
+	TaskType    string         `json:"task_type"`
+	Difficulty  string         `json:"difficulty"`
+	Options     []optionInput  `json:"options"`
+	Tags        []string       `json:"tags"`
+	Examples    []exampleInput `json:"examples"`
+	Constraints []string       `json:"constraints"`
+	Source      *sourceInput   `json:"source"`
+}
+
+type exampleInput struct {
+	Input       string `json:"input"`
+	Output      string `json:"output"`
+	Explanation string `json:"explanation"`
+}
+
+type sourceInput struct {
+	SourceID    string     `json:"source_id"`
+	SourceName  string     `json:"source_name"`
+	SourceURL   string     `json:"source_url"`
+	PublishedAt *time.Time `json:"published_at"`
 }
 
 type optionInput struct {
@@ -51,6 +68,10 @@ type taskResponse struct {
 	TaskType      string           `json:"task_type"`
 	Difficulty    string           `json:"difficulty"`
 	Options       []optionResponse `json:"options"`
+	Tags          []string         `json:"tags"`
+	Examples      []exampleInput   `json:"examples"`
+	Constraints   []string         `json:"constraints"`
+	Source        *sourceInput     `json:"source,omitempty"`
 	CreatedAt     time.Time        `json:"created_at"`
 	UpdatedAt     time.Time        `json:"updated_at"`
 }
@@ -84,6 +105,27 @@ type submissionResponse struct {
 	CreatedAt           time.Time `json:"created_at"`
 }
 
+type codeSubmissionResponse struct {
+	ID                string                       `json:"id"`
+	UserID            string                       `json:"user_id"`
+	TaskID            string                       `json:"task_id"`
+	TaskVersionID     string                       `json:"task_version_id"`
+	TaskVersionNumber int                          `json:"task_version_number"`
+	ExecutionID       string                       `json:"execution_id"`
+	CorrelationID     string                       `json:"correlation_id"`
+	Language          string                       `json:"language"`
+	SourceFileName    string                       `json:"source_file_name"`
+	Status            string                       `json:"status"`
+	Verdict           *domain.ExecutionVerdict     `json:"verdict,omitempty"`
+	Compilation       *domain.ExecutionPhaseResult `json:"compilation,omitempty"`
+	Execution         *domain.ExecutionPhaseResult `json:"execution,omitempty"`
+	Tests             []domain.ExecutionTestResult `json:"tests"`
+	Failure           *domain.ExecutionFailure     `json:"failure,omitempty"`
+	CreatedAt         time.Time                    `json:"created_at"`
+	UpdatedAt         time.Time                    `json:"updated_at"`
+	CompletedAt       *time.Time                   `json:"completed_at,omitempty"`
+}
+
 type listResponse[T any] struct {
 	Items  []T `json:"items"`
 	Limit  int `json:"limit"`
@@ -110,6 +152,12 @@ func (input taskInput) domainInput() (domain.TaskInput, error) {
 		TaskType:   domain.TaskType(input.TaskType),
 		Difficulty: domain.Difficulty(input.Difficulty),
 		Options:    options,
+		Tags:       input.Tags,
+		Examples: lo.Map(input.Examples, func(example exampleInput, _ int) domain.TaskExample {
+			return domain.TaskExample{Input: example.Input, Output: example.Output, Explanation: example.Explanation}
+		}),
+		Constraints: input.Constraints,
+		Source:      taskSource(input.Source),
 	}, nil
 }
 
@@ -140,9 +188,33 @@ func responseTask(detail domain.TaskDetail, admin bool) taskResponse {
 		TaskType:      string(detail.Version.TaskType),
 		Difficulty:    string(detail.Version.Difficulty),
 		Options:       options,
-		CreatedAt:     detail.Task.CreatedAt,
-		UpdatedAt:     detail.Task.UpdatedAt,
+		Tags:          detail.Version.Tags,
+		Examples: lo.Map(detail.Version.Examples, func(example domain.TaskExample, _ int) exampleInput {
+			return exampleInput{Input: example.Input, Output: example.Output, Explanation: example.Explanation}
+		}),
+		Constraints: detail.Version.Constraints,
+		Source:      sourceResponse(detail.Version.Source),
+		CreatedAt:   detail.Task.CreatedAt,
+		UpdatedAt:   detail.Task.UpdatedAt,
 	}
+}
+
+// taskSource преобразует transport-атрибуцию в доменную модель.
+func taskSource(input *sourceInput) *domain.TaskSource {
+	if input == nil {
+		return nil
+	}
+
+	return &domain.TaskSource{SourceID: input.SourceID, SourceName: input.SourceName, SourceURL: input.SourceURL, PublishedAt: input.PublishedAt}
+}
+
+// sourceResponse преобразует доменную атрибуцию в transport DTO.
+func sourceResponse(source *domain.TaskSource) *sourceInput {
+	if source == nil {
+		return nil
+	}
+
+	return &sourceInput{SourceID: source.SourceID, SourceName: source.SourceName, SourceURL: source.SourceURL, PublishedAt: source.PublishedAt}
 }
 
 // responseTaskSummary преобразует доменную задачу в элемент списка.
@@ -177,6 +249,35 @@ func responseSubmission(submission domain.Submission) submissionResponse {
 		LatestTaskVersionID: submission.LatestTaskVersionID.String(),
 		LatestVersionNumber: submission.LatestVersionNumber,
 		CreatedAt:           submission.CreatedAt,
+	}
+}
+
+// responseCodeSubmission преобразует запуск в DTO без исходного кода пользователя.
+func responseCodeSubmission(submission domain.CodeSubmission) codeSubmissionResponse {
+	tests := submission.Tests
+	if tests == nil {
+		tests = []domain.ExecutionTestResult{}
+	}
+
+	return codeSubmissionResponse{
+		ID:                submission.ID.String(),
+		UserID:            submission.UserID.String(),
+		TaskID:            submission.TaskID.String(),
+		TaskVersionID:     submission.TaskVersionID.String(),
+		TaskVersionNumber: submission.TaskVersionNumber,
+		ExecutionID:       submission.ExecutionID.String(),
+		CorrelationID:     submission.CorrelationID.String(),
+		Language:          string(submission.Language),
+		SourceFileName:    submission.SourceFileName,
+		Status:            string(submission.Status),
+		Verdict:           submission.Verdict,
+		Compilation:       submission.Compilation,
+		Execution:         submission.Execution,
+		Tests:             tests,
+		Failure:           submission.Failure,
+		CreatedAt:         submission.CreatedAt,
+		UpdatedAt:         submission.UpdatedAt,
+		CompletedAt:       submission.CompletedAt,
 	}
 }
 

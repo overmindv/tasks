@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/overmindv/tasks/internal/domain"
@@ -145,5 +146,17 @@ func newHandlerRepository() (*handlerRepository, uuid.UUID, uuid.UUID) {
 func testHandler(repo *handlerRepository) http.Handler {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	return New(usecase.NewTaskService(repo), usecase.NewSubmissionService(repo), repo, logger)
+	return New(
+		usecase.NewTaskService(repo),
+		usecase.NewSubmissionService(repo),
+		usecase.NewCodeSubmissionService(repo, usecase.CodeExecutionPolicy{
+			RequestsTopic:    "code-execution.requests.v1",
+			TimeLimit:        time.Second,
+			MemoryLimitBytes: 64 * 1024 * 1024,
+		}),
+		usecase.NewCandidateService(repo),
+		repo,
+		logger,
+		"test-ingest-token",
+	)
 }

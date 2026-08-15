@@ -65,6 +65,29 @@ func TestValidateTaskInput(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "programming valid without options",
+			input: TaskInput{
+				Title:       "Два указателя",
+				Statement:   "Найдите пару с заданной суммой.",
+				TaskType:    TaskTypeProgramming,
+				Difficulty:  DifficultyMedium,
+				Tags:        []string{"arrays"},
+				Examples:    []TaskExample{{Input: "1 2 3", Output: "1 3"}},
+				Constraints: []string{"1 <= n <= 1000"},
+			},
+		},
+		{
+			name: "programming rejects choice options",
+			input: TaskInput{
+				Title:      "Два указателя",
+				Statement:  "Найдите пару с заданной суммой.",
+				TaskType:   TaskTypeProgramming,
+				Difficulty: DifficultyMedium,
+				Options:    []OptionInput{{Text: "вариант", IsCorrect: true}},
+			},
+			wantErr: true,
+		},
 	}
 	for _, test := range tests {
 		test := test

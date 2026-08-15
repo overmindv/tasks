@@ -228,7 +228,7 @@ func taskFilter(r *http.Request, allowStatus bool) (domain.TaskFilter, error) {
 	}
 	if value := r.URL.Query().Get("task_type"); value != "" {
 		taskType := domain.TaskType(value)
-		if taskType != domain.TaskTypeSingleChoice && taskType != domain.TaskTypeMultipleChoice {
+		if taskType != domain.TaskTypeSingleChoice && taskType != domain.TaskTypeMultipleChoice && taskType != domain.TaskTypeProgramming {
 			return domain.TaskFilter{}, apperror.New(apperror.ValidationError, "неподдерживаемый task_type", http.StatusBadRequest)
 		}
 		filter.TaskType = &taskType

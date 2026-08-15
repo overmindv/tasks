@@ -63,6 +63,9 @@ func (s *SubmissionService) Submit(ctx context.Context, taskID, userID uuid.UUID
 		if err != nil {
 			return fmt.Errorf("get submitted task version: %w", err)
 		}
+		if version.TaskType == domain.TaskTypeProgramming {
+			return apperror.New(apperror.TaskTypeNotSubmittable, "программная задача не принимает ответы в сервисе", http.StatusConflict)
+		}
 		if err := validateSelectedOptions(version, selected); err != nil {
 			return err
 		}
