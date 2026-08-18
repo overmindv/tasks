@@ -66,3 +66,12 @@ jobs:
           go-version-file: go.mod
       - name: Run component tests
         run: make ctest
+
+  # Полный e2e-прогон системы (см. overmindv/tests) при пуше/PR в этот сервис.
+  e2e:
+    permissions:
+      contents: read
+    uses: overmindv/tests/.github/workflows/e2e.yml@main
+    with:
+      target_repo: tasks
+
