@@ -34,13 +34,24 @@ func NewOutboxDispatcher(store repository.Repository, publisher Publisher, pollI
 	}
 }
 
-// Run публикует due messages до отмены context или ошибки repository.
+// Run публикует due messages до отмены context. Транзиентные ошибки БД/Kafka
+// (рестарт/репликация постгрес, rebalance и т.п.) не роняют сервис: после backoff
+// попытка повторяется, доставка остаётся at-least-once.
 func (d *OutboxDispatcher) Run(ctx context.Context) error {
 	ticker := time.NewTicker(d.pollInterval)
 	defer ticker.Stop()
 	for {
 		if err := d.dispatch(ctx); err != nil {
-			return fmt.Errorf("dispatch code submission outbox: %w", err)
+			if ctx.Err() != nil {
+				return nil
+			}
+			d.logger.ErrorContext(ctx, "outbox dispatch: временная ошибка, повтор", "error", err)
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(d.pollInterval):
+			}
+			continue
 		}
 		select {
 		case <-ctx.Done():

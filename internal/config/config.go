@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -11,12 +10,6 @@ import (
 )
 
 const (
-	defaultServiceName  = "tasks"
-	defaultHTTPAddress  = ":8080"
-	defaultLogLevel     = "info"
-	defaultEnvironment  = "local"
-	defaultReadTimeout  = 10 * time.Second
-	defaultWriteTimeout = 20 * time.Second
 	defaultKafkaBroker  = "kafka:9092"
 	defaultRequestTopic = "code-execution.requests.v1"
 	defaultResultTopic  = "code-execution.results.v1"
@@ -27,13 +20,6 @@ const (
 )
 
 type Config struct {
-	ServiceName           string
-	HTTPAddress           string
-	DatabaseURL           string
-	LogLevel              string
-	Environment           string
-	ReadTimeout           time.Duration
-	WriteTimeout          time.Duration
 	TaskHunterIngestToken string
 	KafkaBrokers          []string
 	KafkaRequestsTopic    string
@@ -44,17 +30,9 @@ type Config struct {
 	OutboxPollInterval    time.Duration
 }
 
-// Load читает, нормализует и проверяет конфигурацию окружения.
+// Load читает, нормализует и проверяет бизнес-конфигурацию окружения.
+// Инфраструктура (HTTP, Postgres, лог, Kafka-брокеры producer) — на parker.
 func Load() (Config, error) {
-	readTimeout, err := envDuration("READ_TIMEOUT", defaultReadTimeout)
-	if err != nil {
-		return Config{}, err
-	}
-
-	writeTimeout, err := envDuration("WRITE_TIMEOUT", defaultWriteTimeout)
-	if err != nil {
-		return Config{}, err
-	}
 	executionTimeout, err := envDuration("CODE_EXECUTION_TIME_LIMIT", defaultExecutionTTL)
 	if err != nil {
 		return Config{}, err
@@ -69,13 +47,6 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		ServiceName:           env("SERVICE_NAME", defaultServiceName),
-		HTTPAddress:           env("HTTP_ADDR", defaultHTTPAddress),
-		DatabaseURL:           strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		LogLevel:              env("LOG_LEVEL", defaultLogLevel),
-		Environment:           env("ENV", defaultEnvironment),
-		ReadTimeout:           readTimeout,
-		WriteTimeout:          writeTimeout,
 		TaskHunterIngestToken: strings.TrimSpace(os.Getenv("TASK_HUNTER_INGEST_TOKEN")),
 		KafkaBrokers:          envList("KAFKA_BOOTSTRAP_SERVERS", defaultKafkaBroker),
 		KafkaRequestsTopic:    env("KAFKA_REQUESTS_TOPIC", defaultRequestTopic),
@@ -93,49 +64,8 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
-// Validate проверяет обязательные и ограниченные настройки сервиса.
+// Validate проверяет обязательные и ограниченные бизнес-настройки сервиса.
 func (c Config) Validate() error {
-	if c.ServiceName == "" {
-		return errors.New("SERVICE_NAME не задан")
-	}
-
-	if c.HTTPAddress == "" {
-		return errors.New("HTTP_ADDR не задан")
-	}
-
-	if c.DatabaseURL == "" {
-		return errors.New("DATABASE_URL не задан")
-	}
-
-	if err := validateDatabaseURL(c.DatabaseURL); err != nil {
-		return fmt.Errorf("DATABASE_URL некорректен: %w", err)
-	}
-
-	switch c.LogLevel {
-	case "debug", "info", "warn", "error":
-	default:
-		return fmt.Errorf(
-			"недопустимый LOG_LEVEL %q: ожидается debug, info, warn или error",
-			c.LogLevel,
-		)
-	}
-
-	switch c.Environment {
-	case "local", "development", "test", "staging", "production":
-	default:
-		return fmt.Errorf(
-			"недопустимый ENV %q",
-			c.Environment,
-		)
-	}
-
-	if c.ReadTimeout <= 0 {
-		return errors.New("READ_TIMEOUT должен быть больше нуля")
-	}
-
-	if c.WriteTimeout <= 0 {
-		return errors.New("WRITE_TIMEOUT должен быть больше нуля")
-	}
 	if c.TaskHunterIngestToken == "" {
 		return errors.New("TASK_HUNTER_INGEST_TOKEN не задан")
 	}
@@ -161,28 +91,6 @@ func (c Config) Validate() error {
 	}
 	if c.OutboxPollInterval <= 0 || c.OutboxPollInterval > time.Minute {
 		return errors.New("KAFKA_OUTBOX_POLL_INTERVAL должен быть больше нуля и не превышать 1m")
-	}
-
-	return nil
-}
-
-// validateDatabaseURL проверяет схему, host и имя PostgreSQL database.
-func validateDatabaseURL(value string) error {
-	parsed, err := url.Parse(value)
-	if err != nil {
-		return err
-	}
-
-	if parsed.Scheme != "postgres" && parsed.Scheme != "postgresql" {
-		return fmt.Errorf("неподдерживаемая схема %q", parsed.Scheme)
-	}
-
-	if parsed.Host == "" {
-		return errors.New("не указан host")
-	}
-
-	if strings.TrimPrefix(parsed.Path, "/") == "" {
-		return errors.New("не указано имя базы данных")
 	}
 
 	return nil

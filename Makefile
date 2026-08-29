@@ -1,5 +1,4 @@
 LOCAL_BIN := $(CURDIR)/bin
-GOOSE := $(LOCAL_BIN)/goose
 JET := $(LOCAL_BIN)/jet
 GOLANGCI_LINT := $(LOCAL_BIN)/golangci-lint
 DATABASE_URL ?= postgres://postgres:postgres@localhost:5432/tasks?sslmode=disable
@@ -34,20 +33,20 @@ test:
 
 # ctest — component-тесты: применяет миграции к ВЫДЕЛЕННОЙ тестовой БД
 # и гоняет полный HTTP-сценарий. Не направляйте на общую/production database.
-ctest: $(GOOSE)
-	$(GOOSE) -dir migrations postgres "$(COMPONENT_TEST_DSN)" up
+ctest:
+	go run ./cmd/tasks migrate --dir migrations --dsn "$(COMPONENT_TEST_DSN)" up
 	COMPONENT_TEST_DSN="$(COMPONENT_TEST_DSN)" go test -count=1 -tags=component ./tests/component/...
 
 # lint — статический анализ (gofmt, goimports, staticcheck и др.).
 lint: $(GOLANGCI_LINT)
 	$(GOLANGCI_LINT) run
 
-# migrate-up / migrate-down — применяют или откатывают миграции к DATABASE_URL.
-migrate-up: $(GOOSE)
-	$(GOOSE) -dir migrations postgres "$(DATABASE_URL)" up
+# migrate-up / migrate-down — применяют или откатывают миграции к DATABASE_URL (via parker).
+migrate-up:
+	go run ./cmd/tasks migrate --dir migrations --dsn "$(DATABASE_URL)" up
 
-migrate-down: $(GOOSE)
-	$(GOOSE) -dir migrations postgres "$(DATABASE_URL)" down
+migrate-down:
+	go run ./cmd/tasks migrate --dir migrations --dsn "$(DATABASE_URL)" down
 
 # jet-generate — перегенерирует типизированные Jet-модели из live-schema БД.
 # Нужен только при изменении схемы; требует поднятого PostgreSQL.
@@ -59,9 +58,6 @@ tidy:
 	go mod tidy
 
 # Установка вспомогательных инструментов в bin/ (один раз, gitignored).
-$(GOOSE):
-	GOBIN="$(LOCAL_BIN)" go install -tags="no_clickhouse no_mssql no_mysql no_sqlite3 no_libsql no_ydb no_vertica" github.com/pressly/goose/v3/cmd/goose@v3.24.3
-
 $(JET):
 	GOBIN="$(LOCAL_BIN)" go install github.com/go-jet/jet/v2/cmd/jet@v2.14.0
 

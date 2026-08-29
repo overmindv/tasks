@@ -9,13 +9,6 @@ import (
 func TestConfigValidate(t *testing.T) {
 	t.Parallel()
 	valid := Config{
-		ServiceName:           "tasks",
-		HTTPAddress:           ":8080",
-		DatabaseURL:           "postgres://tasks_it:password@postgres:5432/tasks_it?sslmode=disable",
-		LogLevel:              "info",
-		Environment:           "test",
-		ReadTimeout:           time.Second,
-		WriteTimeout:          time.Second,
 		TaskHunterIngestToken: "test-token",
 		KafkaBrokers:          []string{"kafka:9092"},
 		KafkaRequestsTopic:    "code-execution.requests.v1",

@@ -22,11 +22,6 @@ type handlerRepository struct {
 	submission domain.Submission
 }
 
-// Ping сообщает HTTP ready handler об успешной готовности.
-func (r *handlerRepository) Ping(_ context.Context) error {
-	return nil
-}
-
 // GetTaskDetail возвращает подготовленную задачу для transport теста.
 func (r *handlerRepository) GetTaskDetail(_ context.Context, _ uuid.UUID) (domain.TaskDetail, error) {
 	return r.detail, nil
@@ -52,9 +47,6 @@ func TestTaskResponsesHideCorrectAnswers(t *testing.T) {
 	handler.ServeHTTP(publicResponse, publicRequest)
 	if publicResponse.Code != http.StatusOK {
 		t.Fatalf("public status = %d, body = %s", publicResponse.Code, publicResponse.Body.String())
-	}
-	if publicResponse.Header().Get(requestIDHeader) == "" {
-		t.Fatal("public response должен содержать X-Request-ID")
 	}
 	if strings.Contains(publicResponse.Body.String(), "is_correct") {
 		t.Fatalf("public response раскрывает правильный ответ: %s", publicResponse.Body.String())
@@ -145,8 +137,9 @@ func newHandlerRepository() (*handlerRepository, uuid.UUID, uuid.UUID) {
 // testHandler собирает HTTP handler с тихим логгером.
 func testHandler(repo *handlerRepository) http.Handler {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	return New(
+	mux := http.NewServeMux()
+	Register(
+		mux,
 		usecase.NewTaskService(repo),
 		usecase.NewSubmissionService(repo),
 		usecase.NewCodeSubmissionService(repo, usecase.CodeExecutionPolicy{
@@ -155,8 +148,9 @@ func testHandler(repo *handlerRepository) http.Handler {
 			MemoryLimitBytes: 64 * 1024 * 1024,
 		}),
 		usecase.NewCandidateService(repo),
-		repo,
 		logger,
 		"test-ingest-token",
 	)
+
+	return mux
 }
