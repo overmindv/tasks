@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/overmindv/tasks/internal/execution"
@@ -31,32 +32,53 @@ func NewResultConsumer(client *kgo.Client, service *usecase.CodeSubmissionServic
 }
 
 // Run последовательно обрабатывает records, чтобы commit не обгонял запись результата.
+// Транзиентные ошибки Kafka (rebalance, join группы, недоступность координатора) и БД
+// не должны ронять сервис: после backoff опрос продолжается. Выход — только по отмене
+// context (graceful shutdown). Доставка остаётся at-least-once.
 func (c *ResultConsumer) Run(ctx context.Context) error {
+	const (
+		initialRetry = time.Second
+		maxRetry     = 30 * time.Second
+	)
+	retry := initialRetry
 	for {
 		fetches := c.client.PollRecords(ctx, 1)
 		if ctx.Err() != nil {
 			return nil
 		}
+		var err error
 		if errs := fetches.Errors(); len(errs) > 0 {
-			return fmt.Errorf("poll Kafka results: %w", errs[0].Err)
-		}
-		records := fetches.Records()
-		if len(records) == 0 {
+			err = fmt.Errorf("poll Kafka results: %w", errs[0].Err)
 			c.client.AllowRebalance()
-			continue
+		} else {
+			records := fetches.Records()
+			if len(records) == 0 {
+				c.client.AllowRebalance()
+				retry = initialRetry
+				continue
+			}
+			record := records[0]
+			if processErr := c.process(ctx, record); processErr != nil {
+				err = fmt.Errorf("process Kafka result topic=%s partition=%d offset=%d: %w", record.Topic, record.Partition, record.Offset, processErr)
+				c.client.AllowRebalance()
+			} else if commitErr := c.client.CommitRecords(ctx, record); commitErr != nil {
+				err = fmt.Errorf("commit Kafka result offset: %w", commitErr)
+				c.client.AllowRebalance()
+			} else {
+				c.client.AllowRebalance()
+				retry = initialRetry
+				continue
+			}
 		}
-		record := records[0]
-		if err := c.process(ctx, record); err != nil {
-			c.client.AllowRebalance()
-
-			return fmt.Errorf("process Kafka result topic=%s partition=%d offset=%d: %w", record.Topic, record.Partition, record.Offset, err)
+		c.logger.WarnContext(ctx, "Kafka result consumer: временная ошибка, повтор", "error", err, "retry_after", retry)
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(retry):
 		}
-		if err := c.client.CommitRecords(ctx, record); err != nil {
-			c.client.AllowRebalance()
-
-			return fmt.Errorf("commit Kafka result offset: %w", err)
+		if retry < maxRetry {
+			retry *= 2
 		}
-		c.client.AllowRebalance()
 	}
 }
 

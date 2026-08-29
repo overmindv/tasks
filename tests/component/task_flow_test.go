@@ -83,15 +83,18 @@ func TestVersionedTaskFlow(t *testing.T) {
 		TimeLimit:        time.Second,
 		MemoryLimitBytes: 64 * 1024 * 1024,
 	})
-	handler := httpapi.New(
+	mux := http.NewServeMux()
+	httpapi.Register(
+		mux,
 		usecase.NewTaskService(store),
 		usecase.NewSubmissionService(store),
 		codeService,
 		usecase.NewCandidateService(store),
-		store,
 		logger,
 		"component-ingest-token",
 	)
+
+	handler := mux
 	adminID := uuid.NewString()
 	userID := uuid.NewString()
 

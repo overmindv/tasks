@@ -21,22 +21,6 @@ type actor struct {
 	Admin  bool
 }
 
-// healthHandler сообщает, что процесс HTTP API запущен.
-func (h *Handler) healthHandler(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// readyHandler проверяет доступность PostgreSQL.
-func (h *Handler) readyHandler(w http.ResponseWriter, r *http.Request) {
-	if err := h.health.Ping(r.Context()); err != nil {
-		h.logger.ErrorContext(r.Context(), "проверка готовности PostgreSQL завершилась ошибкой", "error", err, "request_id", requestID(r.Context()))
-		writeJSON(w, http.StatusServiceUnavailable, apperror.New(apperror.InternalError, "сервис временно не готов", http.StatusServiceUnavailable))
-
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
-}
-
 // requireUser извлекает доверенный user ID и роли из internal headers.
 func requireUser(w http.ResponseWriter, r *http.Request) (actor, bool) {
 	userID, err := uuid.Parse(strings.TrimSpace(r.Header.Get("X-User-ID")))
