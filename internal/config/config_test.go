@@ -9,14 +9,20 @@ import (
 func TestConfigValidate(t *testing.T) {
 	t.Parallel()
 	valid := Config{
-		TaskHunterIngestToken: "test-token",
-		KafkaBrokers:          []string{"kafka:9092"},
-		KafkaRequestsTopic:    "code-execution.requests.v1",
-		KafkaResultsTopic:     "code-execution.results.v1",
-		KafkaResultsGroup:     "tasks-code-results-v1",
-		CodeExecutionTimeout:  time.Second,
-		CodeExecutionMemory:   64 * 1024 * 1024,
-		OutboxPollInterval:    500 * time.Millisecond,
+		TaskHunterIngestToken:   "test-token",
+		KafkaBrokers:            []string{"kafka:9092"},
+		KafkaRequestsTopic:      "code-execution.requests.v1",
+		KafkaResultsTopic:       "code-execution.results.v1",
+		KafkaResultsGroup:       "tasks-code-results-v1",
+		CodeExecutionTimeout:    time.Second,
+		CodeExecutionMemory:     64 * 1024 * 1024,
+		OutboxPollInterval:      500 * time.Millisecond,
+		ExecutionPIDs:           32,
+		ExecutionStdoutBytes:    32768,
+		ExecutionStderrBytes:    32768,
+		ExecutionWorkspaceBytes: 1048576,
+		PythonVersion:           "3.12",
+		GoVersion:               "1.26",
 	}
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
