@@ -10,24 +10,36 @@ import (
 )
 
 const (
-	defaultKafkaBroker  = "kafka:9092"
-	defaultRequestTopic = "code-execution.requests.v1"
-	defaultResultTopic  = "code-execution.results.v1"
-	defaultResultGroup  = "tasks-code-results-v1"
-	defaultExecutionTTL = time.Second
-	defaultMemoryBytes  = 64 * 1024 * 1024
-	defaultOutboxPoll   = 500 * time.Millisecond
+	defaultKafkaBroker    = "kafka:9092"
+	defaultRequestTopic   = "code-execution.requests.v1"
+	defaultResultTopic    = "code-execution.results.v1"
+	defaultResultGroup    = "tasks-code-results-v1"
+	defaultExecutionTTL   = time.Second
+	defaultMemoryBytes    = 64 * 1024 * 1024
+	defaultOutboxPoll     = 500 * time.Millisecond
+	defaultExecutionPIDs  = 32
+	defaultStdoutBytes    = 32768
+	defaultStderrBytes    = 32768
+	defaultWorkspaceBytes = 1048576
+	defaultPythonVersion  = "3.12"
+	defaultGoVersion      = "1.26"
 )
 
 type Config struct {
-	TaskHunterIngestToken string
-	KafkaBrokers          []string
-	KafkaRequestsTopic    string
-	KafkaResultsTopic     string
-	KafkaResultsGroup     string
-	CodeExecutionTimeout  time.Duration
-	CodeExecutionMemory   int64
-	OutboxPollInterval    time.Duration
+	TaskHunterIngestToken   string
+	KafkaBrokers            []string
+	KafkaRequestsTopic      string
+	KafkaResultsTopic       string
+	KafkaResultsGroup       string
+	CodeExecutionTimeout    time.Duration
+	CodeExecutionMemory     int64
+	OutboxPollInterval      time.Duration
+	ExecutionPIDs           int
+	ExecutionStdoutBytes    int
+	ExecutionStderrBytes    int
+	ExecutionWorkspaceBytes int
+	PythonVersion           string
+	GoVersion               string
 }
 
 // Load читает, нормализует и проверяет бизнес-конфигурацию окружения.
@@ -45,16 +57,38 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	pids, err := envInt("CODE_EXECUTION_PIDS", defaultExecutionPIDs)
+	if err != nil {
+		return Config{}, err
+	}
+	stdoutBytes, err := envInt("CODE_EXECUTION_STDOUT_BYTES", defaultStdoutBytes)
+	if err != nil {
+		return Config{}, err
+	}
+	stderrBytes, err := envInt("CODE_EXECUTION_STDERR_BYTES", defaultStderrBytes)
+	if err != nil {
+		return Config{}, err
+	}
+	workspaceBytes, err := envInt("CODE_EXECUTION_WORKSPACE_BYTES", defaultWorkspaceBytes)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
-		TaskHunterIngestToken: strings.TrimSpace(os.Getenv("TASK_HUNTER_INGEST_TOKEN")),
-		KafkaBrokers:          envList("KAFKA_BOOTSTRAP_SERVERS", defaultKafkaBroker),
-		KafkaRequestsTopic:    env("KAFKA_REQUESTS_TOPIC", defaultRequestTopic),
-		KafkaResultsTopic:     env("KAFKA_RESULTS_TOPIC", defaultResultTopic),
-		KafkaResultsGroup:     env("KAFKA_RESULTS_CONSUMER_GROUP", defaultResultGroup),
-		CodeExecutionTimeout:  executionTimeout,
-		CodeExecutionMemory:   memoryBytes,
-		OutboxPollInterval:    outboxPollInterval,
+		TaskHunterIngestToken:   strings.TrimSpace(os.Getenv("TASK_HUNTER_INGEST_TOKEN")),
+		KafkaBrokers:            envList("KAFKA_BOOTSTRAP_SERVERS", defaultKafkaBroker),
+		KafkaRequestsTopic:      env("KAFKA_REQUESTS_TOPIC", defaultRequestTopic),
+		KafkaResultsTopic:       env("KAFKA_RESULTS_TOPIC", defaultResultTopic),
+		KafkaResultsGroup:       env("KAFKA_RESULTS_CONSUMER_GROUP", defaultResultGroup),
+		CodeExecutionTimeout:    executionTimeout,
+		CodeExecutionMemory:     memoryBytes,
+		OutboxPollInterval:      outboxPollInterval,
+		ExecutionPIDs:           pids,
+		ExecutionStdoutBytes:    stdoutBytes,
+		ExecutionStderrBytes:    stderrBytes,
+		ExecutionWorkspaceBytes: workspaceBytes,
+		PythonVersion:           env("CODE_EXECUTION_PYTHON_VERSION", defaultPythonVersion),
+		GoVersion:               env("CODE_EXECUTION_GO_VERSION", defaultGoVersion),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -92,6 +126,15 @@ func (c Config) Validate() error {
 	if c.OutboxPollInterval <= 0 || c.OutboxPollInterval > time.Minute {
 		return errors.New("KAFKA_OUTBOX_POLL_INTERVAL должен быть больше нуля и не превышать 1m")
 	}
+	if c.ExecutionPIDs <= 0 {
+		return errors.New("CODE_EXECUTION_PIDS должен быть положительным")
+	}
+	if c.ExecutionStdoutBytes < 0 || c.ExecutionStderrBytes < 0 || c.ExecutionWorkspaceBytes <= 0 {
+		return errors.New("лимиты размера вывода должны быть неотрицательными, workspace — положительным")
+	}
+	if c.PythonVersion == "" || c.GoVersion == "" {
+		return errors.New("версии рантайма python и go не должны быть пустыми")
+	}
 
 	return nil
 }
@@ -119,6 +162,20 @@ func envDuration(key string, fallback time.Duration) (time.Duration, error) {
 	}
 
 	return duration, nil
+}
+
+// envInt разбирает int из окружения или возвращает fallback.
+func envInt(key string, fallback int) (int, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback, nil
+	}
+	number, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s должен быть целым числом: %w", key, err)
+	}
+
+	return number, nil
 }
 
 // envInt64 разбирает int64 из окружения или возвращает fallback.

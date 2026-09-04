@@ -6,6 +6,7 @@ import (
 	"github.com/overmindv/parker"
 	postgresadapter "github.com/overmindv/tasks/internal/adapter/postgres"
 	"github.com/overmindv/tasks/internal/config"
+	"github.com/overmindv/tasks/internal/domain"
 	"github.com/overmindv/tasks/internal/transport/httpapi"
 	kafkaadapter "github.com/overmindv/tasks/internal/transport/kafka"
 	"github.com/overmindv/tasks/internal/usecase"
@@ -47,6 +48,14 @@ func Build(app *parker.App) error {
 		RequestsTopic:    cfg.KafkaRequestsTopic,
 		TimeLimit:        cfg.CodeExecutionTimeout,
 		MemoryLimitBytes: cfg.CodeExecutionMemory,
+		PIDs:             cfg.ExecutionPIDs,
+		StdoutBytes:      cfg.ExecutionStdoutBytes,
+		StderrBytes:      cfg.ExecutionStderrBytes,
+		WorkspaceBytes:   cfg.ExecutionWorkspaceBytes,
+		LanguageVersions: map[domain.ProgrammingLanguage]string{
+			domain.ProgrammingLanguagePython: cfg.PythonVersion,
+			domain.ProgrammingLanguageGo:     cfg.GoVersion,
+		},
 	})
 	candidateService := usecase.NewCandidateService(store)
 

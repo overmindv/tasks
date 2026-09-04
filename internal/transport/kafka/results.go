@@ -90,10 +90,10 @@ func (c *ResultConsumer) process(ctx context.Context, record *kgo.Record) error 
 		Offset:        record.Offset,
 		PayloadSHA256: payloadHash(record.Value),
 	}
-	event, err := execution.DecodeResult(record.Value)
+	result, err := execution.DecodeRunResult(record.Value)
 	if err != nil {
-		eventID, errorCode := rejectedEnvelope(record.Value)
-		if rejectErr := c.service.RejectResult(ctx, metadata, eventID, errorCode); rejectErr != nil {
+		attemptID, errorCode := rejectedEnvelope(record.Value)
+		if rejectErr := c.service.RejectResult(ctx, metadata, attemptID, errorCode); rejectErr != nil {
 			return fmt.Errorf("persist rejected execution result: %w", rejectErr)
 		}
 		c.logger.WarnContext(ctx, "невалидный Kafka result event отклонён",
@@ -105,14 +105,18 @@ func (c *ResultConsumer) process(ctx context.Context, record *kgo.Record) error 
 
 		return nil
 	}
-	if err := c.service.HandleResult(ctx, metadata, event); err != nil {
+	if err := c.service.HandleRunResult(ctx, metadata, result); err != nil {
 		if usecase.IsPermanentResultError(err) {
-			if rejectErr := c.service.RejectResult(ctx, metadata, &event.EventID, execution.InboxErrorInvalidEvent); rejectErr != nil {
+			var attemptID *uuid.UUID
+			if parsed, parseErr := uuid.Parse(result.AttemptID); parseErr == nil {
+				attemptID = &parsed
+			}
+			if rejectErr := c.service.RejectResult(ctx, metadata, attemptID, execution.InboxErrorInvalidEvent); rejectErr != nil {
 				return fmt.Errorf("persist mismatched execution result after %v: %w", err, rejectErr)
 			}
 			c.logger.WarnContext(ctx, "Kafka result event не соответствует запуску",
-				"event_id", event.EventID,
-				"submission_id", event.SubmissionID,
+				"submission_id", result.SubmissionID,
+				"attempt_id", result.AttemptID,
 				"topic", record.Topic,
 				"partition", record.Partition,
 				"offset", record.Offset,
@@ -124,8 +128,8 @@ func (c *ResultConsumer) process(ctx context.Context, record *kgo.Record) error 
 		return fmt.Errorf("handle execution result: %w", err)
 	}
 	c.logger.InfoContext(ctx, "Kafka result event обработан",
-		"event_id", event.EventID,
-		"submission_id", event.SubmissionID,
+		"submission_id", result.SubmissionID,
+		"attempt_id", result.AttemptID,
 		"topic", record.Topic,
 		"partition", record.Partition,
 		"offset", record.Offset,
@@ -141,23 +145,22 @@ func payloadHash(payload []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// rejectedEnvelope извлекает event ID и отличает неизвестную версию контракта.
+// rejectedEnvelope извлекает attempt ID и отличает неизвестную версию контракта.
 func rejectedEnvelope(payload []byte) (*uuid.UUID, string) {
 	var envelope struct {
-		EventID       uuid.UUID `json:"event_id"`
-		EventType     string    `json:"event_type"`
-		SchemaVersion int       `json:"schema_version"`
+		SchemaVersion string `json:"schema_version"`
+		AttemptID     string `json:"attempt_id"`
 	}
 	if err := json.Unmarshal(payload, &envelope); err != nil {
 		return nil, execution.InboxErrorInvalidEvent
 	}
-	var eventID *uuid.UUID
-	if envelope.EventID != uuid.Nil {
-		eventID = &envelope.EventID
+	var attemptID *uuid.UUID
+	if parsed, err := uuid.Parse(envelope.AttemptID); err == nil && parsed != uuid.Nil {
+		attemptID = &parsed
 	}
-	if envelope.EventType != execution.ResultEventType || envelope.SchemaVersion != execution.SchemaVersion {
-		return eventID, execution.InboxErrorUnsupportedEvent
+	if envelope.SchemaVersion != execution.ResultSchemaVersion {
+		return attemptID, execution.InboxErrorUnsupportedEvent
 	}
 
-	return eventID, execution.InboxErrorInvalidEvent
+	return attemptID, execution.InboxErrorInvalidEvent
 }

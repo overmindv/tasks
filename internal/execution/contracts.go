@@ -7,83 +7,163 @@ import (
 	"fmt"
 	"io"
 	"time"
-
-	"github.com/google/uuid"
-	"github.com/overmindv/tasks/internal/domain"
 )
 
+// Константы контракта исполнения кода между tasks и sandbox
 const (
-	SchemaVersion              = 1
-	RequestEventType           = "code_execution.requested"
-	ResultEventType            = "code_execution.completed"
-	TestVisibilityOpen         = "open"
+	RequestSchemaVersion = "sandbox.run.request.v1"
+	ResultSchemaVersion  = "sandbox.run.result.v1"
+	ExecutionMode        = "execution"
+
+	// CaseStatusOK задаёт статус кейса, который отработал в пределах лимитов.
+	CaseStatusOK = "ok"
+
+	// Статусы результата, возвращаемые sandbox
+	ResultStatusOK              = "ok"
+	ResultStatusTimeLimit       = "tle"
+	ResultStatusMemoryLimit     = "mle"
+	ResultStatusOutputLimit     = "ole"
+	ResultStatusRuntimeError    = "runtime_error"
+	ResultStatusInternalError   = "internal_error"
+	ResultStatusInvalidRequest  = "invalid_request"
+	ResultStatusUnsupportedLang = "unsupported_language"
+
 	InboxStatusProcessed       = "processed"
 	InboxStatusRejected        = "rejected"
 	InboxErrorInvalidEvent     = "INVALID_EVENT"
 	InboxErrorUnsupportedEvent = "UNSUPPORTED_EVENT"
+
+	// MaxExecutionCases задаёт верхнюю границу числа входных кейсов на запуск.
+	MaxExecutionCases = 20
+	// MaxExecutionOutputBytes задаёт безопасный размер вывода на один кейс.
+	MaxExecutionOutputBytes = 64 * 1024
 )
 
-// ResourceLimits описывает обязательные ограничения одного запуска.
-type ResourceLimits struct {
-	TimeMS      int64 `json:"time_ms"`
-	MemoryBytes int64 `json:"memory_bytes"`
+// Language описывает язык и версию решения.
+type Language struct {
+	ID      string `json:"id"`
+	Version string `json:"version"`
 }
 
-// SourceFile описывает один текстовый файл пользовательского решения.
+// SourceFile описывает один файл решения, передаваемый песочнице.
 type SourceFile struct {
-	Name    string `json:"name"`
-	Content string `json:"content"`
+	Path           string `json:"path"`
+	ContentB64     string `json:"content_b64"`
+	ChecksumSHA256 string `json:"checksum_sha256,omitempty"`
 }
 
-// TestCase описывает тест, передаваемый только доверенному sandbox.
-type TestCase struct {
-	ID             string `json:"id"`
-	Visibility     string `json:"visibility"`
-	Input          string `json:"input"`
-	ExpectedOutput string `json:"expected_output"`
+// Code описывает точку входа и файлы пользовательского решения.
+type Code struct {
+	Entrypoint string       `json:"entrypoint,omitempty"`
+	Files      []SourceFile `json:"files"`
 }
 
-// RequestEvent задаёт версионированный контракт запуска кода.
-type RequestEvent struct {
-	EventID       uuid.UUID                  `json:"event_id"`
-	EventType     string                     `json:"event_type"`
-	SchemaVersion int                        `json:"schema_version"`
-	OccurredAt    time.Time                  `json:"occurred_at"`
-	CorrelationID uuid.UUID                  `json:"correlation_id"`
-	SubmissionID  uuid.UUID                  `json:"submission_id"`
-	ExecutionID   uuid.UUID                  `json:"execution_id"`
-	TaskID        uuid.UUID                  `json:"task_id"`
-	TaskVersionID uuid.UUID                  `json:"task_version_id"`
-	Language      domain.ProgrammingLanguage `json:"language"`
-	Source        SourceFile                 `json:"source"`
-	Tests         []TestCase                 `json:"tests"`
-	Limits        ResourceLimits             `json:"limits"`
+// ExecutionSpec задаёт execution-режим: исполнение кода по списку входных данных.
+type ExecutionSpec struct {
+	Mode   string   `json:"mode"`
+	Inputs []string `json:"inputs"`
 }
 
-// ResultEvent задаёт версионированный финальный ответ sandbox.
-type ResultEvent struct {
-	EventID       uuid.UUID                    `json:"event_id"`
-	EventType     string                       `json:"event_type"`
-	SchemaVersion int                          `json:"schema_version"`
-	OccurredAt    time.Time                    `json:"occurred_at"`
-	CorrelationID uuid.UUID                    `json:"correlation_id"`
-	SubmissionID  uuid.UUID                    `json:"submission_id"`
-	ExecutionID   uuid.UUID                    `json:"execution_id"`
-	TaskID        uuid.UUID                    `json:"task_id"`
-	TaskVersionID uuid.UUID                    `json:"task_version_id"`
-	Verdict       domain.ExecutionVerdict      `json:"verdict"`
-	Compilation   *domain.ExecutionPhaseResult `json:"compilation,omitempty"`
-	Execution     *domain.ExecutionPhaseResult `json:"execution,omitempty"`
-	Tests         []domain.ExecutionTestResult `json:"tests"`
-	Failure       *domain.ExecutionFailure     `json:"failure,omitempty"`
+// Limits описывает обязательные ограничения одного запуска.
+type Limits struct {
+	CPUms          int `json:"cpu_ms"`
+	Wallms         int `json:"wall_ms"`
+	MemoryMB       int `json:"memory_mb"`
+	PIDs           int `json:"pids"`
+	StdoutBytes    int `json:"stdout_bytes"`
+	StderrBytes    int `json:"stderr_bytes"`
+	WorkspaceBytes int `json:"workspace_bytes"`
 }
 
-// EncodeRequest сериализует request event после проверки обязательных полей.
-func EncodeRequest(event RequestEvent) ([]byte, error) {
-	if err := ValidateRequest(event); err != nil {
+// RunRequest описывает запрос на исполнение кода, который tasks публикует в Kafka.
+type RunRequest struct {
+	SchemaVersion string         `json:"schema_version"`
+	SubmissionID  string         `json:"submission_id"`
+	AttemptID     string         `json:"attempt_id"`
+	UserID        string         `json:"user_id"`
+	TaskID        string         `json:"task_id"`
+	Language      Language       `json:"language"`
+	Code          Code           `json:"code"`
+	Execution     *ExecutionSpec `json:"execution,omitempty"`
+	Limits        Limits         `json:"limits"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
+	TraceID       string         `json:"trace_id"`
+	CreatedAt     time.Time      `json:"created_at"`
+}
+
+// CaseRunResult описывает результат исполнения одного входного кейса.
+type CaseRunResult struct {
+	Index           int     `json:"index"`
+	Stdout          string  `json:"stdout"`
+	Stderr          string  `json:"stderr"`
+	Truncated       bool    `json:"truncated"`
+	ExitCode        *int    `json:"exit_code"`
+	Signal          *string `json:"signal"`
+	CPUms           int     `json:"cpu_ms,omitempty"`
+	MemoryPeakBytes int64   `json:"memory_peak_bytes,omitempty"`
+	DurationMS      int     `json:"duration_ms,omitempty"`
+	Status          string  `json:"status"`
+}
+
+// ResultSummary содержит агрегированные счётчики полного запуска.
+// Поля tests_* и first_failed_test объявлены для совместимости со строгим декодом
+// sandbox-контракта (песочница всегда шлёт их в pytest-режиме).
+type ResultSummary struct {
+	CasesTotal      int    `json:"cases_total"`
+	CasesWithError  int    `json:"cases_with_error"`
+	TestsTotal      int    `json:"tests_total"`
+	TestsPassed     int    `json:"tests_passed"`
+	TestsFailed     int    `json:"tests_failed"`
+	FirstFailedTest string `json:"first_failed_test,omitempty"`
+}
+
+// ResultResources содержит агрегированные метрики полного запуска.
+type ResultResources struct {
+	CPUms           int     `json:"cpu_ms"`
+	MemoryPeakBytes int64   `json:"memory_peak_bytes"`
+	ExitCode        *int    `json:"exit_code"`
+	Signal          *string `json:"signal"`
+	DurationMS      int     `json:"duration_ms,omitempty"`
+}
+
+// RunError содержит машинный код и безопасное описание ошибки песочницы.
+type RunError struct {
+	Code      string         `json:"code"`
+	Message   string         `json:"message"`
+	Retryable bool           `json:"retryable"`
+	Details   map[string]any `json:"details,omitempty"`
+}
+
+// RunResult описывает финальный ответ песочницы на запрос исполнения кода.
+type RunResult struct {
+	SchemaVersion string          `json:"schema_version"`
+	SubmissionID  string          `json:"submission_id"`
+	AttemptID     string          `json:"attempt_id"`
+	UserID        string          `json:"user_id,omitempty"`
+	TaskID        string          `json:"task_id,omitempty"`
+	Language      Language        `json:"language,omitempty"`
+	Status        string          `json:"status"`
+	Summary       ResultSummary   `json:"summary"`
+	Resources     ResultResources `json:"resources"`
+	// Timing, Logs и Tests sandbox всегда включает в result даже в execution-режиме.
+	// tasks их не использует, но объявляет через RawMessage, чтобы строгий декод
+	// (DisallowUnknownFields) не отклонял события песочницы как «невалидные».
+	Timing    json.RawMessage `json:"timing"`
+	Logs      json.RawMessage `json:"logs"`
+	Tests     json.RawMessage `json:"tests,omitempty"`
+	Cases     []CaseRunResult `json:"cases,omitempty"`
+	Error     *RunError       `json:"error"`
+	TraceID   string          `json:"trace_id,omitempty"`
+	WorkerID  string          `json:"worker_id,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
+}
+
+// EncodeRunRequest сериализует request event после проверки обязательных полей.
+func EncodeRunRequest(request RunRequest) ([]byte, error) {
+	if err := ValidateRunRequest(request); err != nil {
 		return nil, fmt.Errorf("validate execution request: %w", err)
 	}
-	payload, err := json.Marshal(event)
+	payload, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("marshal execution request: %w", err)
 	}
@@ -91,115 +171,92 @@ func EncodeRequest(event RequestEvent) ([]byte, error) {
 	return payload, nil
 }
 
-// ValidateRequest проверяет обязательные идентификаторы и данные для sandbox.
-func ValidateRequest(event RequestEvent) error {
-	if event.EventID == uuid.Nil || event.SubmissionID == uuid.Nil || event.ExecutionID == uuid.Nil || event.CorrelationID == uuid.Nil || event.TaskID == uuid.Nil || event.TaskVersionID == uuid.Nil {
-		return errors.New("идентификаторы события, решения, запуска, корреляции, задачи и версии обязательны")
+// ValidateRunRequest проверяет обязательные идентификаторы, файл, входы и лимиты.
+func ValidateRunRequest(request RunRequest) error {
+	if request.SchemaVersion != RequestSchemaVersion {
+		return fmt.Errorf("неподдерживаемая schema_version %q", request.SchemaVersion)
 	}
-	if event.EventType != RequestEventType || event.SchemaVersion != SchemaVersion || event.OccurredAt.IsZero() {
-		return errors.New("тип, версия схемы или время request event некорректны")
+	if request.SubmissionID == "" || request.AttemptID == "" || request.UserID == "" || request.TaskID == "" {
+		return errors.New("submission_id, attempt_id, user_id и task_id обязательны")
 	}
-	if err := domain.ValidateSourceFile(event.Language, event.Source.Name, event.Source.Content); err != nil {
-		return fmt.Errorf("validate source file: %w", err)
+	if request.Language.ID == "" || request.Language.Version == "" {
+		return errors.New("language.id и language.version обязательны")
 	}
-	if event.Limits.TimeMS <= 0 || event.Limits.MemoryBytes <= 0 {
+	if len(request.Code.Files) == 0 {
+		return errors.New("для запуска нужен хотя бы один файл решения")
+	}
+	for _, file := range request.Code.Files {
+		if file.Path == "" || file.ContentB64 == "" {
+			return errors.New("каждый файл должен содержать path и content_b64")
+		}
+	}
+	if request.Execution == nil || request.Execution.Mode != ExecutionMode {
+		return errors.New("execution.mode должен быть 'execution'")
+	}
+	if len(request.Execution.Inputs) == 0 {
+		return errors.New("для запуска нужен хотя бы один входной кейс")
+	}
+	if request.Limits.CPUms <= 0 || request.Limits.Wallms <= 0 || request.Limits.MemoryMB <= 0 {
 		return errors.New("лимиты времени и памяти должны быть положительными")
 	}
-	if len(event.Tests) == 0 {
-		return errors.New("для запуска нужен хотя бы один тест")
+	if request.Limits.Wallms < request.Limits.CPUms {
+		return errors.New("wall_ms должен быть не меньше cpu_ms")
 	}
-	for _, test := range event.Tests {
-		if test.ID == "" || test.Visibility != TestVisibilityOpen || test.ExpectedOutput == "" {
-			return errors.New("тест должен содержать id, open visibility и expected_output")
-		}
+	if request.CreatedAt.IsZero() {
+		return errors.New("created_at обязателен")
 	}
 
 	return nil
 }
 
-// DecodeResult строго декодирует ровно один result event.
-func DecodeResult(payload []byte) (ResultEvent, error) {
+// DecodeRunResult строго декодирует ровно один result event песочницы.
+func DecodeRunResult(payload []byte) (RunResult, error) {
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
-	var event ResultEvent
-	if err := decoder.Decode(&event); err != nil {
-		return ResultEvent{}, fmt.Errorf("decode execution result: %w", err)
+	var result RunResult
+	if err := decoder.Decode(&result); err != nil {
+		return RunResult{}, fmt.Errorf("decode execution result: %w", err)
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return ResultEvent{}, errors.New("execution result должен содержать один JSON-объект")
+		return RunResult{}, errors.New("execution result должен содержать один JSON-объект")
 	}
-	if err := ValidateResult(event); err != nil {
-		return ResultEvent{}, fmt.Errorf("validate execution result: %w", err)
+	if err := ValidateRunResult(result); err != nil {
+		return RunResult{}, fmt.Errorf("validate execution result: %w", err)
 	}
 
-	return event, nil
+	return result, nil
 }
 
-// ValidateResult проверяет envelope, verdict и безопасные границы вывода sandbox.
-func ValidateResult(event ResultEvent) error {
-	if event.EventID == uuid.Nil || event.SubmissionID == uuid.Nil || event.ExecutionID == uuid.Nil || event.CorrelationID == uuid.Nil || event.TaskID == uuid.Nil || event.TaskVersionID == uuid.Nil {
-		return errors.New("идентификаторы result event обязательны")
+// ValidateRunResult проверяет envelope, статус и безопасные границы вывода песочницы.
+func ValidateRunResult(result RunResult) error {
+	if result.SchemaVersion != ResultSchemaVersion {
+		return fmt.Errorf("неподдерживаемая schema_version %q", result.SchemaVersion)
 	}
-	if event.EventType != ResultEventType {
-		return fmt.Errorf("неподдерживаемый event_type %q", event.EventType)
+	if result.SubmissionID == "" || result.AttemptID == "" {
+		return errors.New("submission_id и attempt_id обязательны")
 	}
-	if event.SchemaVersion != SchemaVersion {
-		return fmt.Errorf("неподдерживаемая schema_version %d", event.SchemaVersion)
+	if result.Status == "" {
+		return errors.New("status обязателен")
 	}
-	if event.OccurredAt.IsZero() {
-		return errors.New("occurred_at обязателен")
+	if result.CreatedAt.IsZero() {
+		return errors.New("created_at обязателен")
 	}
-	if !domain.IsFinalExecutionVerdict(event.Verdict) {
-		return fmt.Errorf("неподдерживаемый verdict %q", event.Verdict)
+	if len(result.Cases) > MaxExecutionCases {
+		return fmt.Errorf("число кейсов не должно превышать %d", MaxExecutionCases)
 	}
-	if event.Tests == nil || len(event.Tests) > domain.MaxExecutionTestResults {
-		return fmt.Errorf("tests должен быть массивом не более чем из %d результатов", domain.MaxExecutionTestResults)
-	}
-	if err := validatePhase(event.Compilation); err != nil {
-		return fmt.Errorf("validate compilation: %w", err)
-	}
-	if err := validatePhase(event.Execution); err != nil {
-		return fmt.Errorf("validate execution: %w", err)
-	}
-	for _, test := range event.Tests {
-		if test.TestID == "" || !domain.IsFinalExecutionVerdict(test.Verdict) {
-			return errors.New("результат теста содержит пустой test_id или неизвестный verdict")
+	for _, run := range result.Cases {
+		if run.Index < 0 || run.Index >= len(result.Cases) {
+			return errors.New("индекс кейса выходит за границы массива")
 		}
-		if test.DurationMS < 0 || test.MemoryBytes < 0 || len(test.Stdout) > domain.MaxExecutionOutputSize || len(test.Stderr) > domain.MaxExecutionOutputSize {
-			return errors.New("результат теста выходит за допустимые границы")
+		if run.Status == "" {
+			return errors.New("каждый кейс должен содержать status")
+		}
+		if len(run.Stdout) > MaxExecutionOutputBytes || len(run.Stderr) > MaxExecutionOutputBytes {
+			return errors.New("вывод кейса превышает допустимый размер")
 		}
 	}
-	if event.Failure != nil && (!isTechnicalCode(event.Failure.Code) || len(event.Failure.Code) > 100 || len(event.Failure.Message) > 2000) {
-		return errors.New("failure должен содержать code и ограниченный message")
-	}
-
-	return nil
-}
-
-// isTechnicalCode проверяет машинный код в формате SNAKE_CASE.
-func isTechnicalCode(value string) bool {
-	if value == "" {
-		return false
-	}
-	for _, character := range value {
-		if character != '_' && (character < 'A' || character > 'Z') && (character < '0' || character > '9') {
-			return false
-		}
-	}
-
-	return true
-}
-
-// validatePhase проверяет метрики и размер вывода одной фазы.
-func validatePhase(phase *domain.ExecutionPhaseResult) error {
-	if phase == nil {
-		return nil
-	}
-	if phase.DurationMS < 0 || phase.MemoryBytes < 0 {
-		return errors.New("duration_ms и memory_bytes не могут быть отрицательными")
-	}
-	if len(phase.Stdout) > domain.MaxExecutionOutputSize || len(phase.Stderr) > domain.MaxExecutionOutputSize {
-		return fmt.Errorf("stdout и stderr не должны превышать %d байт", domain.MaxExecutionOutputSize)
+	if result.Error != nil && (result.Error.Code == "" || len(result.Error.Message) > 2000) {
+		return errors.New("error должен содержать code и ограниченный message")
 	}
 
 	return nil

@@ -138,12 +138,16 @@ func TestCodeSubmissionServiceUsesTransactionalOutboxAndIdempotency(t *testing.T
 	if created.Status != domain.CodeSubmissionStatusQueued || created.SourceFileName != "main.py" || len(repo.outbox) != 1 {
 		t.Fatalf("created = %#v, outbox = %d", created, len(repo.outbox))
 	}
-	var event execution.RequestEvent
-	if err := json.Unmarshal(repo.outbox[0].Payload, &event); err != nil {
+	var request execution.RunRequest
+	if err := json.Unmarshal(repo.outbox[0].Payload, &request); err != nil {
 		t.Fatalf("decode outbox request: %v", err)
 	}
-	if event.SubmissionID != created.ID || event.ExecutionID != created.ExecutionID || len(event.Tests) != 1 || event.Limits.TimeMS != 1000 {
-		t.Fatalf("event = %#v", event)
+	if request.SubmissionID != created.ID.String() || request.AttemptID != created.ExecutionID.String() ||
+		request.Execution == nil || len(request.Execution.Inputs) != 1 ||
+		request.Execution.Inputs[0] != "hello" ||
+		request.Code.Files == nil || len(request.Code.Files) != 1 || request.Code.Files[0].ContentB64 == "" ||
+		request.Limits.CPUms != 1000 || request.Limits.Wallms < request.Limits.CPUms {
+		t.Fatalf("request = %#v", request)
 	}
 	repeated, err := service.Submit(context.Background(), taskID, userID, input)
 	if err != nil || repeated.ID != created.ID || len(repo.outbox) != 1 {
@@ -169,27 +173,27 @@ func TestCodeSubmissionServiceCompletesAndDeduplicatesResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	event := execution.ResultEvent{
-		EventID:       uuid.New(),
-		EventType:     execution.ResultEventType,
-		SchemaVersion: execution.SchemaVersion,
-		OccurredAt:    time.Now().UTC(),
-		CorrelationID: created.CorrelationID,
-		SubmissionID:  created.ID,
-		ExecutionID:   created.ExecutionID,
-		TaskID:        created.TaskID,
-		TaskVersionID: created.TaskVersionID,
-		Verdict:       domain.ExecutionVerdictAccepted,
-		Tests: []domain.ExecutionTestResult{
-			{TestID: "open-1", Verdict: domain.ExecutionVerdictAccepted},
+	exit := 0
+	result := execution.RunResult{
+		SchemaVersion: execution.ResultSchemaVersion,
+		SubmissionID:  created.ID.String(),
+		AttemptID:     created.ExecutionID.String(),
+		UserID:        created.UserID.String(),
+		TaskID:        created.TaskID.String(),
+		Status:        execution.ResultStatusOK,
+		Summary:       execution.ResultSummary{CasesTotal: 1},
+		Resources:     execution.ResultResources{CPUms: 10, MemoryPeakBytes: 1024, ExitCode: &exit},
+		Cases: []execution.CaseRunResult{
+			{Index: 0, Stdout: "hello", Status: execution.CaseStatusOK, CPUms: 10, MemoryPeakBytes: 1024},
 		},
+		CreatedAt: time.Now().UTC(),
 	}
 	metadata := ExecutionMessageMetadata{Topic: "results", Partition: 0, Offset: 1, PayloadSHA256: strings.Repeat("a", 64)}
-	if err := service.HandleResult(context.Background(), metadata, event); err != nil {
-		t.Fatalf("HandleResult() error = %v", err)
+	if err := service.HandleRunResult(context.Background(), metadata, result); err != nil {
+		t.Fatalf("HandleRunResult() error = %v", err)
 	}
-	if err := service.HandleResult(context.Background(), metadata, event); err != nil {
-		t.Fatalf("duplicate HandleResult() error = %v", err)
+	if err := service.HandleRunResult(context.Background(), metadata, result); err != nil {
+		t.Fatalf("duplicate HandleRunResult() error = %v", err)
 	}
 	completed := repo.submissions[created.ID]
 	if completed.Status != domain.CodeSubmissionStatusCompleted || completed.Verdict == nil || *completed.Verdict != domain.ExecutionVerdictAccepted || len(repo.inbox) != 1 {
@@ -197,28 +201,44 @@ func TestCodeSubmissionServiceCompletesAndDeduplicatesResult(t *testing.T) {
 	}
 }
 
-// TestValidateExecutionTestsRejectsInconsistentAccepted проверяет защиту от ложного accepted.
-func TestValidateExecutionTestsRejectsInconsistentAccepted(t *testing.T) {
+// TestVerdictFromRunResult проверяет вывод вердикта из вывода кейсов в tasks.
+func TestVerdictFromRunResult(t *testing.T) {
 	t.Parallel()
-	examples := []domain.TaskExample{
+	expected := []domain.TaskExample{
 		{Input: "1", Output: "1"},
 		{Input: "2", Output: "2"},
 	}
-	event := execution.ResultEvent{
-		Verdict: domain.ExecutionVerdictAccepted,
-		Tests: []domain.ExecutionTestResult{
-			{TestID: "open-1", Verdict: domain.ExecutionVerdictAccepted},
+
+	accepted := execution.RunResult{
+		Status: execution.ResultStatusOK,
+		Cases: []execution.CaseRunResult{
+			{Index: 0, Stdout: "1", Status: execution.CaseStatusOK},
+			{Index: 1, Stdout: "2", Status: execution.CaseStatusOK},
 		},
 	}
-	if err := validateExecutionTests(examples, event); err == nil {
-		t.Fatal("accepted должен содержать все открытые тесты")
+	verdict, tests, _ := verdictFromRunResult(accepted, expected)
+	if verdict != domain.ExecutionVerdictAccepted || len(tests) != 2 || tests[0].TestID != "open-1" {
+		t.Fatalf("accepted verdict = %#v, tests = %#v", verdict, tests)
 	}
-	event.Tests = []domain.ExecutionTestResult{
-		{TestID: "open-1", Verdict: domain.ExecutionVerdictAccepted},
-		{TestID: "hidden-1", Verdict: domain.ExecutionVerdictAccepted},
+
+	wrong := accepted
+	wrong.Cases[1].Stdout = "3"
+	verdict, _, _ = verdictFromRunResult(wrong, expected)
+	if verdict != domain.ExecutionVerdictWrongAnswer {
+		t.Fatalf("expected wrong_answer, got %q", verdict)
 	}
-	if err := validateExecutionTests(examples, event); err == nil {
-		t.Fatal("результат должен отклонить неизвестный test_id")
+
+	tle := accepted
+	tle.Cases[0] = execution.CaseRunResult{Index: 0, Status: execution.ResultStatusTimeLimit}
+	verdict, _, _ = verdictFromRunResult(tle, expected)
+	if verdict != domain.ExecutionVerdictTimeLimitExceeded {
+		t.Fatalf("expected time_limit_exceeded, got %q", verdict)
+	}
+
+	runLevel := execution.RunResult{Status: execution.ResultStatusRuntimeError, Error: &execution.RunError{Code: "runtime_error"}}
+	verdict, _, _ = verdictFromRunResult(runLevel, expected)
+	if verdict != domain.ExecutionVerdictRuntimeError {
+		t.Fatalf("expected runtime_error, got %q", verdict)
 	}
 }
 
@@ -246,6 +266,14 @@ func newCodeSubmissionService() (*codeSubmissionMemoryRepository, *CodeSubmissio
 		RequestsTopic:    "code-execution.requests.v1",
 		TimeLimit:        time.Second,
 		MemoryLimitBytes: 64 * 1024 * 1024,
+		PIDs:             32,
+		StdoutBytes:      32768,
+		StderrBytes:      32768,
+		WorkspaceBytes:   1048576,
+		LanguageVersions: map[domain.ProgrammingLanguage]string{
+			domain.ProgrammingLanguagePython: "3.12",
+			domain.ProgrammingLanguageGo:     "1.26",
+		},
 	})
 
 	return repo, service, taskID, versionID

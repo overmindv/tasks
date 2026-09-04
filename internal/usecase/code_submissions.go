@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -18,11 +19,29 @@ import (
 	"github.com/overmindv/tasks/internal/repository"
 )
 
-// CodeExecutionPolicy задаёт topic и ограничения, которыми владеет tasks.
+// Границы исполнения, совместимые с sandbox (DefaultValidationOptions).
+const (
+	minMemoryMB = 16
+	maxMemoryMB = 1024
+	minCPUms    = 100
+	maxCPUms    = 30000
+	maxWallms   = 60000
+)
+
+// CodeExecutionPolicy задаёт topic, ограничения и версии языков, которыми владеет tasks.
 type CodeExecutionPolicy struct {
 	RequestsTopic    string
 	TimeLimit        time.Duration
 	MemoryLimitBytes int64
+
+	// Sandbox-совместимые лимиты исполнения.
+	PIDs           int
+	StdoutBytes    int
+	StderrBytes    int
+	WorkspaceBytes int
+
+	// LanguageVersions задаёт версию рантайма по умолчанию на язык.
+	LanguageVersions map[domain.ProgrammingLanguage]string
 }
 
 // CodeSubmissionInput описывает один загруженный пользователем файл решения.
@@ -89,9 +108,9 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 		if version.TaskType != domain.TaskTypeProgramming {
 			return apperror.New(apperror.TaskTypeNotSubmittable, "загрузка файла доступна только для programming-задач", http.StatusConflict)
 		}
-		tests := openExecutionTests(version.Examples)
-		if len(tests) == 0 {
-			return apperror.New(apperror.TaskNotExecutable, "у задачи нет открытых тестов с ожидаемым результатом", http.StatusConflict)
+		open := openExamples(version.Examples)
+		if len(open) == 0 {
+			return apperror.New(apperror.TaskNotExecutable, "у задачи нет открытых примеров с ожидаемым результатом", http.StatusConflict)
 		}
 		now := time.Now().UTC()
 		submission = domain.CodeSubmission{
@@ -112,28 +131,34 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 			CreatedAt:         now,
 			UpdatedAt:         now,
 		}
-		event := execution.RequestEvent{
-			EventID:       uuid.New(),
-			EventType:     execution.RequestEventType,
-			SchemaVersion: execution.SchemaVersion,
-			OccurredAt:    now,
-			CorrelationID: submission.CorrelationID,
-			SubmissionID:  submission.ID,
-			ExecutionID:   submission.ExecutionID,
-			TaskID:        taskID,
-			TaskVersionID: version.ID,
-			Language:      input.Language,
-			Source: execution.SourceFile{
-				Name:    input.SourceFileName,
-				Content: input.SourceCode,
+		request := execution.RunRequest{
+			SchemaVersion: execution.RequestSchemaVersion,
+			SubmissionID:  submission.ID.String(),
+			AttemptID:     submission.ExecutionID.String(),
+			UserID:        userID.String(),
+			TaskID:        taskID.String(),
+			Language: execution.Language{
+				ID:      string(input.Language),
+				Version: languageVersion(s.policy, input.Language),
 			},
-			Tests: tests,
-			Limits: execution.ResourceLimits{
-				TimeMS:      s.policy.TimeLimit.Milliseconds(),
-				MemoryBytes: s.policy.MemoryLimitBytes,
+			Code: execution.Code{
+				Entrypoint: input.SourceFileName,
+				Files: []execution.SourceFile{
+					{
+						Path:       input.SourceFileName,
+						ContentB64: base64.StdEncoding.EncodeToString([]byte(input.SourceCode)),
+					},
+				},
 			},
+			Execution: &execution.ExecutionSpec{
+				Mode:   execution.ExecutionMode,
+				Inputs: exampleInputs(open),
+			},
+			Limits:    s.executionLimits(input.Language),
+			TraceID:   submission.CorrelationID.String(),
+			CreatedAt: now,
 		}
-		payload, err := execution.EncodeRequest(event)
+		payload, err := execution.EncodeRunRequest(request)
 		if err != nil {
 			return fmt.Errorf("encode execution request: %w", err)
 		}
@@ -141,7 +166,7 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 			return fmt.Errorf("insert code submission: %w", err)
 		}
 		if err := tx.InsertOutboxMessage(ctx, domain.OutboxMessage{
-			ID:          event.EventID,
+			ID:          uuid.New(),
 			AggregateID: submission.ID,
 			Topic:       s.policy.RequestsTopic,
 			MessageKey:  submission.ExecutionID.String(),
@@ -190,9 +215,10 @@ func (s *CodeSubmissionService) ListMine(ctx context.Context, filter domain.Code
 	return items, nil
 }
 
-// HandleResult дедуплицирует Kafka message и атомарно завершает ожидающее решение.
-func (s *CodeSubmissionService) HandleResult(ctx context.Context, metadata ExecutionMessageMetadata, event execution.ResultEvent) error {
-	record := executionInboxRecord(metadata, &event.EventID, execution.InboxStatusProcessed, "")
+// HandleRunResult дедуплицирует Kafka message, сверяет вывод кейсов с эталоном
+// и атомарно завершает ожидающее решение.
+func (s *CodeSubmissionService) HandleRunResult(ctx context.Context, metadata ExecutionMessageMetadata, result execution.RunResult) error {
+	record := executionInboxRecord(metadata, nil, execution.InboxStatusProcessed, "")
 	err := s.repository.WithinTransaction(ctx, func(tx repository.Repository) error {
 		inserted, err := tx.InsertExecutionInbox(ctx, record)
 		if err != nil {
@@ -201,37 +227,38 @@ func (s *CodeSubmissionService) HandleResult(ctx context.Context, metadata Execu
 		if !inserted {
 			return nil
 		}
-		current, err := tx.GetCodeSubmission(ctx, event.SubmissionID)
+		submissionID, parseErr := uuid.Parse(result.SubmissionID)
+		if parseErr != nil {
+			return apperror.New(apperror.ExecutionResultMismatch, "результат содержит некорректный submission_id", http.StatusConflict)
+		}
+		current, err := tx.GetCodeSubmission(ctx, submissionID)
 		if err != nil {
 			return apperror.New(apperror.ExecutionResultMismatch, "результат относится к неизвестному запуску", http.StatusConflict)
 		}
-		if !matchesExecutionResult(current, event) {
+		if !matchesRunResult(current, result) {
 			return apperror.New(apperror.ExecutionResultMismatch, "идентификаторы результата не соответствуют запуску", http.StatusConflict)
 		}
 		if current.Status == domain.CodeSubmissionStatusCompleted {
 			return nil
 		}
-		version, err := tx.GetTaskVersion(ctx, event.TaskID, event.TaskVersionID)
+		version, err := tx.GetTaskVersion(ctx, current.TaskID, current.TaskVersionID)
 		if err != nil {
 			return apperror.New(apperror.ExecutionResultMismatch, "версия задачи результата не найдена", http.StatusConflict)
 		}
-		if err := validateExecutionTests(version.Examples, event); err != nil {
-			return apperror.New(apperror.ExecutionResultMismatch, err.Error(), http.StatusConflict)
-		}
-		completedAt := event.OccurredAt.UTC()
-		verdict := event.Verdict
+		verdict, tests, failure := verdictFromRunResult(result, openExamples(version.Examples))
+		completedAt := result.CreatedAt.UTC()
+		executionPhase := executionPhaseFromResult(result)
 		updated, err := tx.CompleteCodeSubmission(ctx, domain.CodeSubmission{
-			ID:            event.SubmissionID,
-			TaskID:        event.TaskID,
-			TaskVersionID: event.TaskVersionID,
-			ExecutionID:   event.ExecutionID,
-			CorrelationID: event.CorrelationID,
+			ID:            current.ID,
+			TaskID:        current.TaskID,
+			TaskVersionID: current.TaskVersionID,
+			ExecutionID:   current.ExecutionID,
+			CorrelationID: current.CorrelationID,
 			Status:        domain.CodeSubmissionStatusCompleted,
 			Verdict:       &verdict,
-			Compilation:   event.Compilation,
-			Execution:     event.Execution,
-			Tests:         event.Tests,
-			Failure:       event.Failure,
+			Execution:     executionPhase,
+			Tests:         tests,
+			Failure:       failure,
 			CompletedAt:   &completedAt,
 		})
 		if err != nil {
@@ -269,22 +296,164 @@ func IsPermanentResultError(err error) bool {
 	return errors.As(err, &public) && public.Code == apperror.ExecutionResultMismatch
 }
 
-// openExecutionTests преобразует открытые примеры версии в стабильные тесты Kafka-контракта.
-func openExecutionTests(examples []domain.TaskExample) []execution.TestCase {
-	tests := make([]execution.TestCase, 0, len(examples))
-	for position, example := range examples {
-		if example.Output == "" {
-			continue
+// executionLimits строит sandbox-совместимые лимиты с учётом допустимых границ песочницы.
+func (s *CodeSubmissionService) executionLimits(_ domain.ProgrammingLanguage) execution.Limits {
+	memoryMB := int(s.policy.MemoryLimitBytes / (1 << 20))
+	if memoryMB < minMemoryMB {
+		memoryMB = minMemoryMB
+	}
+	if memoryMB > maxMemoryMB {
+		memoryMB = maxMemoryMB
+	}
+	cpuMS := int(s.policy.TimeLimit.Milliseconds())
+	if cpuMS < minCPUms {
+		cpuMS = minCPUms
+	}
+	if cpuMS > maxCPUms {
+		cpuMS = maxCPUms
+	}
+	wallMS := cpuMS
+	if wallMS > maxWallms {
+		wallMS = maxWallms
+	}
+
+	return execution.Limits{
+		CPUms:          cpuMS,
+		Wallms:         wallMS,
+		MemoryMB:       memoryMB,
+		PIDs:           s.policy.PIDs,
+		StdoutBytes:    s.policy.StdoutBytes,
+		StderrBytes:    s.policy.StderrBytes,
+		WorkspaceBytes: s.policy.WorkspaceBytes,
+	}
+}
+
+// languageVersion возвращает версию рантайма по умолчанию для языка решения.
+func languageVersion(policy CodeExecutionPolicy, language domain.ProgrammingLanguage) string {
+	if version := policy.LanguageVersions[language]; version != "" {
+		return version
+	}
+	switch language {
+	case domain.ProgrammingLanguageGo:
+		return "1.26"
+	default:
+		return "3.12"
+	}
+}
+
+// executionPhaseFromResult агрегирует метрики полного запуска в доменную фазу исполнения.
+func executionPhaseFromResult(result execution.RunResult) *domain.ExecutionPhaseResult {
+	return &domain.ExecutionPhaseResult{
+		ExitCode:    result.Resources.ExitCode,
+		DurationMS:  int64(result.Resources.DurationMS),
+		MemoryBytes: result.Resources.MemoryPeakBytes,
+	}
+}
+
+// verdictFromRunResult сравнивает вывод каждого кейса с ожидаемым и выводит итоговый вердикт.
+// Вердикт вычисляется в tasks: sandbox возвращает только вывод и мета-данные.
+func verdictFromRunResult(result execution.RunResult, expected []domain.TaskExample) (domain.ExecutionVerdict, []domain.ExecutionTestResult, *domain.ExecutionFailure) {
+	if len(result.Cases) == 0 {
+		return runLevelVerdict(result)
+	}
+
+	tests := make([]domain.ExecutionTestResult, 0, len(result.Cases))
+	best := domain.ExecutionVerdictAccepted
+	for _, run := range result.Cases {
+		verdict := caseVerdict(run, expectedAt(expected, run.Index))
+		if verdictPriority(verdict) > verdictPriority(best) {
+			best = verdict
 		}
-		tests = append(tests, execution.TestCase{
-			ID:             "open-" + strconv.Itoa(position+1),
-			Visibility:     execution.TestVisibilityOpen,
-			Input:          example.Input,
-			ExpectedOutput: example.Output,
+		tests = append(tests, domain.ExecutionTestResult{
+			TestID:      "open-" + strconv.Itoa(run.Index+1),
+			Verdict:     verdict,
+			Stdout:      run.Stdout,
+			Stderr:      run.Stderr,
+			DurationMS:  int64(run.CPUms),
+			MemoryBytes: run.MemoryPeakBytes,
 		})
 	}
 
-	return tests
+	var failure *domain.ExecutionFailure
+	if result.Error != nil && best != domain.ExecutionVerdictAccepted {
+		failure = &domain.ExecutionFailure{Code: result.Error.Code, Message: result.Error.Message}
+	}
+
+	return best, tests, failure
+}
+
+// runLevelVerdict обрабатывает случай без кейсов: sandbox вернул run-level ошибку.
+func runLevelVerdict(result execution.RunResult) (domain.ExecutionVerdict, []domain.ExecutionTestResult, *domain.ExecutionFailure) {
+	var verdict domain.ExecutionVerdict
+	switch result.Status {
+	case execution.ResultStatusTimeLimit:
+		verdict = domain.ExecutionVerdictTimeLimitExceeded
+	case execution.ResultStatusMemoryLimit:
+		verdict = domain.ExecutionVerdictMemoryLimitExceeded
+	case execution.ResultStatusOutputLimit:
+		verdict = domain.ExecutionVerdictOutputLimitExceeded
+	case execution.ResultStatusRuntimeError:
+		verdict = domain.ExecutionVerdictRuntimeError
+	case execution.ResultStatusInvalidRequest, execution.ResultStatusUnsupportedLang:
+		verdict = domain.ExecutionVerdictCheckerError
+	default:
+		verdict = domain.ExecutionVerdictInfrastructureError
+	}
+	var failure *domain.ExecutionFailure
+	if result.Error != nil {
+		failure = &domain.ExecutionFailure{Code: result.Error.Code, Message: result.Error.Message}
+	}
+
+	return verdict, []domain.ExecutionTestResult{}, failure
+}
+
+// caseVerdict выводит вердикт одного кейса: лимиты/рантайм из статуса песочницы,
+// иначе — сравнение stdout с ожидаемым выводом открытого примера.
+func caseVerdict(run execution.CaseRunResult, expectedOutput string) domain.ExecutionVerdict {
+	switch run.Status {
+	case execution.ResultStatusTimeLimit:
+		return domain.ExecutionVerdictTimeLimitExceeded
+	case execution.ResultStatusMemoryLimit:
+		return domain.ExecutionVerdictMemoryLimitExceeded
+	case execution.ResultStatusOutputLimit:
+		return domain.ExecutionVerdictOutputLimitExceeded
+	case execution.ResultStatusRuntimeError:
+		return domain.ExecutionVerdictRuntimeError
+	}
+	if run.ExitCode != nil && *run.ExitCode != 0 {
+		return domain.ExecutionVerdictRuntimeError
+	}
+	if strings.TrimRight(run.Stdout, "\r\n") == strings.TrimRight(expectedOutput, "\r\n") {
+		return domain.ExecutionVerdictAccepted
+	}
+
+	return domain.ExecutionVerdictWrongAnswer
+}
+
+// expectedAt возвращает эталон кейса по индексу (индексы совпадают с порядком открытых примеров).
+func expectedAt(expected []domain.TaskExample, index int) string {
+	if index >= 0 && index < len(expected) {
+		return expected[index].Output
+	}
+	return ""
+}
+
+// verdictPriority задаёт порядок значимости вердиктов: выше — серьёзнее.
+func verdictPriority(verdict domain.ExecutionVerdict) int {
+	switch verdict {
+	case domain.ExecutionVerdictOutputLimitExceeded:
+		return 5
+	case domain.ExecutionVerdictMemoryLimitExceeded:
+		return 4
+	case domain.ExecutionVerdictTimeLimitExceeded:
+		return 3
+	case domain.ExecutionVerdictRuntimeError:
+		return 2
+	case domain.ExecutionVerdictWrongAnswer:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // codeRequestHash строит fingerprint всех полей, влияющих на запуск.
@@ -324,42 +493,45 @@ func executionInboxRecord(metadata ExecutionMessageMetadata, eventID *uuid.UUID,
 	}
 }
 
-// matchesExecutionResult защищает решение от результата другого запуска или окружения.
-func matchesExecutionResult(submission domain.CodeSubmission, event execution.ResultEvent) bool {
-	return submission.ID == event.SubmissionID &&
-		submission.ExecutionID == event.ExecutionID &&
-		submission.CorrelationID == event.CorrelationID &&
-		submission.TaskID == event.TaskID &&
-		submission.TaskVersionID == event.TaskVersionID
+// openExamples возвращает примеры с ожидаемым выводом в исходном порядке.
+func openExamples(examples []domain.TaskExample) []domain.TaskExample {
+	open := make([]domain.TaskExample, 0, len(examples))
+	for _, example := range examples {
+		if example.Output == "" {
+			continue
+		}
+		open = append(open, example)
+	}
+
+	return open
 }
 
-// validateExecutionTests проверяет уникальность и принадлежность test ID открытым тестам версии.
-func validateExecutionTests(examples []domain.TaskExample, event execution.ResultEvent) error {
-	expected := openExecutionTests(examples)
-	allowed := make(map[string]struct{}, len(expected))
-	for _, test := range expected {
-		allowed[test.ID] = struct{}{}
-	}
-	seen := make(map[string]struct{}, len(event.Tests))
-	for _, result := range event.Tests {
-		if _, ok := allowed[result.TestID]; !ok {
-			return fmt.Errorf("результат содержит неизвестный test_id %q", result.TestID)
-		}
-		if _, ok := seen[result.TestID]; ok {
-			return fmt.Errorf("результат повторяет test_id %q", result.TestID)
-		}
-		seen[result.TestID] = struct{}{}
-	}
-	if event.Verdict == domain.ExecutionVerdictAccepted {
-		if len(seen) != len(expected) {
-			return errors.New("accepted должен содержать результаты всех открытых тестов")
-		}
-		for _, result := range event.Tests {
-			if result.Verdict != domain.ExecutionVerdictAccepted {
-				return errors.New("accepted не может содержать непройденный тест")
-			}
-		}
+// exampleInputs возвращает входные кейсы открытых примеров (в том же порядке).
+func exampleInputs(open []domain.TaskExample) []string {
+	inputs := make([]string, len(open))
+	for i, example := range open {
+		inputs[i] = example.Input
 	}
 
-	return nil
+	return inputs
+}
+
+// matchesRunResult защищает решение от результата другого запуска или окружения.
+func matchesRunResult(submission domain.CodeSubmission, result execution.RunResult) bool {
+	submissionID, err := uuid.Parse(result.SubmissionID)
+	if err != nil {
+		return false
+	}
+	attemptID, err := uuid.Parse(result.AttemptID)
+	if err != nil {
+		return false
+	}
+	taskID, err := uuid.Parse(result.TaskID)
+	if err != nil {
+		return false
+	}
+
+	return submission.ID == submissionID &&
+		submission.ExecutionID == attemptID &&
+		submission.TaskID == taskID
 }
