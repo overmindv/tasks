@@ -19,7 +19,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	postgresadapter "github.com/overmindv/tasks/internal/adapter/postgres"
-	"github.com/overmindv/tasks/internal/domain"
 	"github.com/overmindv/tasks/internal/execution"
 	"github.com/overmindv/tasks/internal/transport/httpapi"
 	"github.com/overmindv/tasks/internal/usecase"
@@ -190,11 +189,13 @@ func TestVersionedTaskFlow(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT payload FROM code_submission_outbox WHERE aggregate_id = $1", code.ID).Scan(&requestPayload); err != nil {
 		t.Fatalf("query outbox payload: %v", err)
 	}
-	var requestEvent execution.RequestEvent
+	var requestEvent execution.RunRequest
 	if err := json.Unmarshal([]byte(requestPayload), &requestEvent); err != nil {
 		t.Fatalf("decode outbox request event: %v", err)
 	}
-	if requestEvent.Language != domain.ProgrammingLanguagePython || len(requestEvent.Tests) != 1 || requestEvent.Tests[0].Visibility != execution.TestVisibilityOpen {
+	if requestEvent.Language.ID != "python" || requestEvent.Execution == nil ||
+		requestEvent.Execution.Mode != execution.ExecutionMode ||
+		len(requestEvent.Execution.Inputs) != 1 || requestEvent.Execution.Inputs[0] != "hello" {
 		t.Fatalf("request event = %#v", requestEvent)
 	}
 	claimToken := uuid.New()
@@ -205,40 +206,43 @@ func TestVersionedTaskFlow(t *testing.T) {
 	if err := store.MarkOutboxPublished(ctx, claimed[0].ID, claimToken); err != nil {
 		t.Fatalf("MarkOutboxPublished() error = %v", err)
 	}
-	var sourceCleared bool
+	var sourcePreserved bool
 	var payloadCleared bool
 	if err := pool.QueryRow(ctx, `
-		SELECT cs.source_code IS NULL, o.payload IS NULL
+		SELECT cs.source_code IS NOT NULL, o.payload IS NULL
 		FROM code_submissions cs
 		INNER JOIN code_submission_outbox o ON o.aggregate_id = cs.id
-		WHERE cs.id = $1`, code.ID).Scan(&sourceCleared, &payloadCleared); err != nil {
-		t.Fatalf("query cleared source payload: %v", err)
+		WHERE cs.id = $1`, code.ID).Scan(&sourcePreserved, &payloadCleared); err != nil {
+		t.Fatalf("query preserved source / cleared payload: %v", err)
 	}
-	if !sourceCleared || !payloadCleared {
-		t.Fatalf("sourceCleared=%v payloadCleared=%v", sourceCleared, payloadCleared)
+	if !sourcePreserved || !payloadCleared {
+		t.Fatalf("sourcePreserved=%v payloadCleared=%v", sourcePreserved, payloadCleared)
 	}
-	resultEvent := execution.ResultEvent{
-		EventID:       uuid.New(),
-		EventType:     execution.ResultEventType,
-		SchemaVersion: execution.SchemaVersion,
-		OccurredAt:    time.Now().UTC(),
-		CorrelationID: uuid.MustParse(code.CorrelationID),
-		SubmissionID:  uuid.MustParse(code.ID),
-		ExecutionID:   uuid.MustParse(code.ExecutionID),
-		TaskID:        uuid.MustParse(code.TaskID),
-		TaskVersionID: uuid.MustParse(code.TaskVersionID),
-		Verdict:       domain.ExecutionVerdictAccepted,
-		Tests: []domain.ExecutionTestResult{
-			{TestID: "open-1", Verdict: domain.ExecutionVerdictAccepted, Stdout: "hello"},
+	zeroExit := 0
+	resultEvent := execution.RunResult{
+		SchemaVersion: execution.ResultSchemaVersion,
+		SubmissionID:  code.ID,
+		AttemptID:     code.ExecutionID,
+		TaskID:        code.TaskID,
+		Status:        execution.ResultStatusOK,
+		Summary: execution.ResultSummary{
+			CasesTotal: 1,
 		},
+		Resources: execution.ResultResources{
+			ExitCode: &zeroExit,
+		},
+		Cases: []execution.CaseRunResult{
+			{Index: 0, Stdout: "hello", ExitCode: &zeroExit, Status: execution.CaseStatusOK},
+		},
+		CreatedAt: time.Now().UTC(),
 	}
-	if err := codeService.HandleResult(ctx, usecase.ExecutionMessageMetadata{
+	if err := codeService.HandleRunResult(ctx, usecase.ExecutionMessageMetadata{
 		Topic:         "code-execution.results.v1",
 		Partition:     0,
 		Offset:        1,
 		PayloadSHA256: strings.Repeat("a", 64),
 	}, resultEvent); err != nil {
-		t.Fatalf("HandleResult() error = %v", err)
+		t.Fatalf("HandleRunResult() error = %v", err)
 	}
 	completedResponse := componentRawRequest(t, handler, http.MethodGet, "/v1/code-submissions/"+code.ID, userID, "", nil, http.StatusOK)
 	var completed codeSubmissionPayload

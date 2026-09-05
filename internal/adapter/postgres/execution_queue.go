@@ -86,25 +86,19 @@ func (r *Postgres) ClaimOutboxMessages(ctx context.Context, limit int, claimToke
 	return messages, nil
 }
 
-// MarkOutboxPublished подтверждает публикацию и удаляет исходный код из outbox.
+// MarkOutboxPublished подтверждает публикацию outbox-сообщения и очищает его payload.
+// Исходный код решения в code_submissions сохраняется, чтобы его можно было вернуть
+// в ответе API («show code result») на странице деталей запуска.
 func (r *Postgres) MarkOutboxPublished(ctx context.Context, id, claimToken uuid.UUID) error {
 	tag, err := r.query.Exec(ctx, `
-		WITH published AS (
-			UPDATE code_submission_outbox
-			SET payload = NULL,
-				published_at = now(),
-				claim_token = NULL,
-				claimed_until = NULL,
-				last_error = NULL,
-				updated_at = now()
-			WHERE id = $1 AND claim_token = $2 AND published_at IS NULL
-			RETURNING aggregate_id
-		)
-		UPDATE code_submissions cs
-		SET source_code = NULL,
+		UPDATE code_submission_outbox
+		SET payload = NULL,
+			published_at = now(),
+			claim_token = NULL,
+			claimed_until = NULL,
+			last_error = NULL,
 			updated_at = now()
-		FROM published
-		WHERE cs.id = published.aggregate_id`, id, claimToken)
+		WHERE id = $1 AND claim_token = $2 AND published_at IS NULL`, id, claimToken)
 	if err != nil {
 		return fmt.Errorf("mark outbox message published: %w", err)
 	}
