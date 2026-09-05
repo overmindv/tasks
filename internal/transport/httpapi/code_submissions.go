@@ -16,7 +16,7 @@ import (
 
 const maxCodeSubmissionBody = domain.MaxSourceFileSize + 64*1024
 
-// submitCode принимает один файл и создаёт асинхронный запуск программной задачи.
+// submitCode принимает файл либо код из консоли и создаёт асинхронный запуск программной задачи.
 func (h *Handler) submitCode(w http.ResponseWriter, r *http.Request) {
 	actor, ok := requireUser(w, r)
 	if !ok {
@@ -124,50 +124,78 @@ func parseCodeSubmission(w http.ResponseWriter, r *http.Request) (usecase.CodeSu
 	if err != nil {
 		return usecase.CodeSubmissionInput{}, apperror.New(apperror.ValidationError, "idempotency_key должен быть UUID", http.StatusBadRequest)
 	}
-	fileHeader := r.MultipartForm.File["file"][0]
-	file, err := fileHeader.Open()
-	if err != nil {
-		return usecase.CodeSubmissionInput{}, fmt.Errorf("open uploaded source file: %w", err)
+	language := domain.ProgrammingLanguage(r.MultipartForm.Value["language"][0])
+
+	// Файловый вариант: решение загружено файлом.
+	if len(r.MultipartForm.File["file"]) == 1 {
+		fileHeader := r.MultipartForm.File["file"][0]
+		file, err := fileHeader.Open()
+		if err != nil {
+			return usecase.CodeSubmissionInput{}, fmt.Errorf("open uploaded source file: %w", err)
+		}
+		defer func() {
+			_ = file.Close()
+		}()
+		payload, err := io.ReadAll(io.LimitReader(file, domain.MaxSourceFileSize+1))
+		if err != nil {
+			return usecase.CodeSubmissionInput{}, fmt.Errorf("read uploaded source file: %w", err)
+		}
+		if len(payload) > domain.MaxSourceFileSize {
+			return usecase.CodeSubmissionInput{}, apperror.New(apperror.InvalidSourceFile, "файл решения превышает 262144 байта", http.StatusBadRequest)
+		}
+
+		return usecase.CodeSubmissionInput{
+			TaskVersionID:  versionID,
+			IdempotencyKey: idempotencyKey,
+			Language:       language,
+			SourceFileName: fileHeader.Filename,
+			SourceCode:     string(payload),
+		}, nil
 	}
-	defer func() {
-		_ = file.Close()
-	}()
-	payload, err := io.ReadAll(io.LimitReader(file, domain.MaxSourceFileSize+1))
-	if err != nil {
-		return usecase.CodeSubmissionInput{}, fmt.Errorf("read uploaded source file: %w", err)
-	}
-	if len(payload) > domain.MaxSourceFileSize {
-		return usecase.CodeSubmissionInput{}, apperror.New(apperror.InvalidSourceFile, "файл решения превышает 262144 байта", http.StatusBadRequest)
+
+	// Консольный вариант: код введён в редакторе, имя файла выведет usecase из языка.
+	sourceCode := r.MultipartForm.Value["source_code"][0]
+	if len(sourceCode) > domain.MaxSourceFileSize {
+		return usecase.CodeSubmissionInput{}, apperror.New(apperror.InvalidSourceFile, "код решения превышает 262144 байта", http.StatusBadRequest)
 	}
 
 	return usecase.CodeSubmissionInput{
 		TaskVersionID:  versionID,
 		IdempotencyKey: idempotencyKey,
-		Language:       domain.ProgrammingLanguage(r.MultipartForm.Value["language"][0]),
-		SourceFileName: fileHeader.Filename,
-		SourceCode:     string(payload),
+		Language:       language,
+		SourceFileName: "",
+		SourceCode:     sourceCode,
 	}, nil
 }
 
-// validateMultipartFields запрещает неоднозначные, повторяющиеся и неизвестные поля формы.
+// validateMultipartFields запрещает неизвестные/повторяющиеся поля формы и требует
+// ровно один источник решения: файл либо введённый код.
 func validateMultipartFields(form *multipart.Form) error {
-	allowedValues := map[string]struct{}{
+	knownFields := map[string]struct{}{
 		"task_version_id": {},
 		"idempotency_key": {},
 		"language":        {},
+		"source_code":     {},
 	}
 	for key, values := range form.Value {
-		if _, ok := allowedValues[key]; !ok || len(values) != 1 || strings.TrimSpace(values[0]) == "" {
-			return apperror.New(apperror.ValidationError, "multipart-форма содержит неизвестное, пустое или повторяющееся поле", http.StatusBadRequest)
+		if _, ok := knownFields[key]; !ok {
+			return apperror.New(apperror.ValidationError, "multipart-форма содержит неизвестное поле", http.StatusBadRequest)
+		}
+		if len(values) != 1 || strings.TrimSpace(values[0]) == "" {
+			return apperror.New(apperror.ValidationError, "multipart-форма содержит пустое или повторяющееся поле", http.StatusBadRequest)
 		}
 	}
-	for key := range allowedValues {
+	for _, key := range []string{"task_version_id", "idempotency_key", "language"} {
 		if len(form.Value[key]) != 1 {
 			return apperror.New(apperror.ValidationError, "task_version_id, idempotency_key и language обязательны", http.StatusBadRequest)
 		}
 	}
-	if len(form.File) != 1 || len(form.File["file"]) != 1 {
-		return apperror.New(apperror.InvalidSourceFile, "нужно передать ровно один файл в поле file", http.StatusBadRequest)
+	hasFile := len(form.File) == 1 && len(form.File["file"]) == 1
+	if hasFile && len(form.Value["source_code"]) == 1 {
+		return apperror.New(apperror.AmbiguousCodeSource, "передайте либо файл, либо введённый код решения, но не оба", http.StatusBadRequest)
+	}
+	if !hasFile && len(form.Value["source_code"]) != 1 {
+		return apperror.New(apperror.InvalidSourceFile, "нужен либо файл, либо введённый код решения", http.StatusBadRequest)
 	}
 
 	return nil

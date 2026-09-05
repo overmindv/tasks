@@ -141,6 +141,19 @@ func NormalizeSourceFile(fileName, sourceCode string) (string, string) {
 	return fileName, sourceCode
 }
 
+// DefaultSourceFileName возвращает каноническое имя файла решения по языку
+// (вариант «код в консоли», когда файл не загружается).
+func DefaultSourceFileName(language ProgrammingLanguage) (string, error) {
+	switch language {
+	case ProgrammingLanguagePython:
+		return "solution.py", nil
+	case ProgrammingLanguageGo:
+		return "main.go", nil
+	default:
+		return "", fmt.Errorf("неподдерживаемый язык %q", language)
+	}
+}
+
 // ValidateSourceFile проверяет allowlist языка, расширение, размер и текстовый формат файла.
 func ValidateSourceFile(language ProgrammingLanguage, fileName, sourceCode string) error {
 	if language != ProgrammingLanguagePython && language != ProgrammingLanguageGo {

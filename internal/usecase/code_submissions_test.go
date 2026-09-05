@@ -159,6 +159,63 @@ func TestCodeSubmissionServiceUsesTransactionalOutboxAndIdempotency(t *testing.T
 	}
 }
 
+// TestCodeSubmissionServiceConsoleDerivesFileName проверяет консольный вариант:
+// имя файла выводится из языка и попадает в запуск sandbox.
+func TestCodeSubmissionServiceConsoleDerivesFileName(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name         string
+		language     domain.ProgrammingLanguage
+		expectedFile string
+	}{
+		{name: "python", language: domain.ProgrammingLanguagePython, expectedFile: "solution.py"},
+		{name: "go", language: domain.ProgrammingLanguageGo, expectedFile: "main.go"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			repo, service, taskID, versionID := newCodeSubmissionService()
+			created, err := service.Submit(context.Background(), taskID, uuid.New(), CodeSubmissionInput{
+				TaskVersionID:  versionID,
+				IdempotencyKey: uuid.New(),
+				Language:       tc.language,
+				SourceFileName: "", // консольный вариант: файл не загружен
+				SourceCode:     "code",
+			})
+			if err != nil {
+				t.Fatalf("Submit() error = %v", err)
+			}
+			if created.SourceFileName != tc.expectedFile {
+				t.Fatalf("SourceFileName = %q, want %q", created.SourceFileName, tc.expectedFile)
+			}
+			var request execution.RunRequest
+			if err := json.Unmarshal(repo.outbox[0].Payload, &request); err != nil {
+				t.Fatalf("decode outbox request: %v", err)
+			}
+			if request.Code.Entrypoint != tc.expectedFile || len(request.Code.Files) != 1 || request.Code.Files[0].Path != tc.expectedFile {
+				t.Fatalf("request.Code = %#v", request.Code)
+			}
+		})
+	}
+}
+
+// TestCodeSubmissionServiceConsoleRejectsUnsupportedLanguage проверяет, что консольный вариант
+// с неподдерживаемым языком и без имени файла отклоняется.
+func TestCodeSubmissionServiceConsoleRejectsUnsupportedLanguage(t *testing.T) {
+	t.Parallel()
+	_, service, taskID, versionID := newCodeSubmissionService()
+	_, err := service.Submit(context.Background(), taskID, uuid.New(), CodeSubmissionInput{
+		TaskVersionID:  versionID,
+		IdempotencyKey: uuid.New(),
+		Language:       "javascript",
+		SourceFileName: "",
+		SourceCode:     "console.log(1)",
+	})
+	if err == nil {
+		t.Fatal("Submit() должен отклонить неподдерживаемый язык консольного решения")
+	}
+}
+
 // TestCodeSubmissionServiceCompletesAndDeduplicatesResult проверяет inbox и финальное состояние.
 func TestCodeSubmissionServiceCompletesAndDeduplicatesResult(t *testing.T) {
 	t.Parallel()
