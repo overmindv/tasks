@@ -13,6 +13,7 @@ const (
 	CodeSubmissionNotFound    = "CODE_SUBMISSION_NOT_FOUND"
 	TaskNotExecutable         = "TASK_NOT_EXECUTABLE"
 	InvalidSourceFile         = "INVALID_SOURCE_FILE"
+	AmbiguousCodeSource       = "AMBIGUOUS_CODE_SOURCE"
 	ExecutionResultMismatch   = "EXECUTION_RESULT_MISMATCH"
 	InvalidStatusTransition   = "INVALID_STATUS_TRANSITION"
 	InvalidAnswer             = "INVALID_ANSWER"

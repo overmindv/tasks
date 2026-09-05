@@ -77,6 +77,14 @@ func NewCodeSubmissionService(store repository.Repository, policy CodeExecutionP
 
 // Submit валидирует файл и атомарно сохраняет решение вместе с Kafka outbox event.
 func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.UUID, input CodeSubmissionInput) (domain.CodeSubmission, error) {
+	if input.SourceFileName == "" {
+		// Вариант «код в консоли»: имя файла выводится детерминированно из языка.
+		name, nameErr := domain.DefaultSourceFileName(input.Language)
+		if nameErr != nil {
+			return domain.CodeSubmission{}, apperror.New(apperror.InvalidSourceFile, nameErr.Error(), http.StatusBadRequest)
+		}
+		input.SourceFileName = name
+	}
 	input.SourceFileName, input.SourceCode = domain.NormalizeSourceFile(input.SourceFileName, input.SourceCode)
 	if err := domain.ValidateSourceFile(input.Language, input.SourceFileName, input.SourceCode); err != nil {
 		return domain.CodeSubmission{}, apperror.New(apperror.InvalidSourceFile, err.Error(), http.StatusBadRequest)

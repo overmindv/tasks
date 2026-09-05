@@ -292,8 +292,11 @@ paths:
           $ref: "#/components/responses/Conflict"
   /v1/tasks/{id}/code-submissions:
     post:
-      summary: Загрузить файл решения programming-задачи
-      description: Атомарно сохраняет запуск и outbox event, затем возвращает состояние queued.
+      summary: Отправить решение programming-задачи (файлом или кодом из консоли)
+      description: >-
+        Атомарно сохраняет запуск и outbox event, затем возвращает состояние queued. Решение передаётся
+        ровно одним способом: файлом (`file`) либо кодом из консоли (`source_code`). Имя файла для кода
+        из консоли выводится из языка (solution.py / main.go).
       parameters:
         - $ref: "#/components/parameters/TaskID"
         - $ref: "#/components/parameters/UserID"
@@ -783,7 +786,11 @@ components:
     CodeSubmissionInput:
       type: object
       additionalProperties: false
-      required: [task_version_id, idempotency_key, language, file]
+      required: [task_version_id, idempotency_key, language]
+      description: >-
+        Решение должно содержать ровно один источник кода: поле `file` (файл) ИЛИ поле `source_code`
+        (код, введённый в консоли). Если переданы оба — ответ 400 `AMBIGUOUS_CODE_SOURCE`; если ни одного —
+        ответ 400 `INVALID_SOURCE_FILE`.
       properties:
         task_version_id: { type: string, format: uuid }
         idempotency_key: { type: string, format: uuid }
@@ -792,7 +799,11 @@ components:
         file:
           type: string
           format: binary
-          description: UTF-8 файл до 262144 байт; .py для python или .go для go.
+          description: UTF-8 файл до 262144 байт; .py для python или .go для go. Взаимоисключающ с source_code.
+        source_code:
+          type: string
+          maxLength: 262144
+          description: Код из консоли до 262144 байт. Взаимоисключающ с file.
     ExecutionPhaseResult:
       type: object
       required: [stdout, stderr, duration_ms, memory_bytes]
