@@ -23,6 +23,7 @@ type Repository interface {
 	ListTaskDetails(ctx context.Context, filter domain.TaskFilter) ([]domain.TaskDetail, error)
 	SetCurrentTaskVersion(ctx context.Context, taskID, versionID, actorID uuid.UUID) error
 	SetTaskStatus(ctx context.Context, taskID uuid.UUID, status domain.TaskStatus, actorID uuid.UUID) error
+	InsertTaskActivityOutbox(ctx context.Context, message domain.TaskActivityOutboxMessage) error
 	SoftDeleteTask(ctx context.Context, taskID, actorID uuid.UUID) error
 	FindSubmissionByIdempotency(ctx context.Context, userID, key uuid.UUID) (*domain.Submission, error)
 	InsertSubmission(ctx context.Context, submission domain.Submission) error

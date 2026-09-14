@@ -287,6 +287,18 @@ func (r *Postgres) SetTaskStatus(ctx context.Context, taskID uuid.UUID, status d
 	return nil
 }
 
+// InsertTaskActivityOutbox сохраняет business-событие публикации задачи
+// в стандартную parker-таблицу outbox (в той же транзакции, что и статус).
+func (r *Postgres) InsertTaskActivityOutbox(ctx context.Context, message domain.TaskActivityOutboxMessage) error {
+	if _, err := r.query.Exec(ctx, `
+		INSERT INTO outbox (id, topic, message_key, message_value)
+		VALUES ($1, $2, $3, $4)`, message.ID, message.Topic, message.Key, message.Value); err != nil {
+		return fmt.Errorf("insert task activity outbox: %w", err)
+	}
+
+	return nil
+}
+
 // SoftDeleteTask помечает задачу удалённой без очистки истории.
 func (r *Postgres) SoftDeleteTask(ctx context.Context, taskID, actorID uuid.UUID) error {
 	statement := tasks.UPDATE(tasks.DeletedAt, tasks.UpdatedAt, tasks.UpdatedBy).

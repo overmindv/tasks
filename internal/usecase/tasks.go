@@ -2,8 +2,10 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/overmindv/tasks/internal/apperror"
@@ -194,6 +196,11 @@ func (s *TaskService) ChangeStatus(ctx context.Context, taskID uuid.UUID, status
 		if err := tx.SetTaskStatus(ctx, taskID, status, actorID); err != nil {
 			return fmt.Errorf("set task status: %w", err)
 		}
+		if status == domain.TaskStatusPublished {
+			if err := emitTaskActivity(ctx, tx, taskID); err != nil {
+				return fmt.Errorf("emit task activity: %w", err)
+			}
+		}
 
 		return nil
 	})
@@ -248,4 +255,39 @@ func buildVersion(taskID, versionID uuid.UUID, number int, input domain.TaskInpu
 // validation преобразует доменную валидацию в публичную ошибку API.
 func validation(err error) error {
 	return apperror.New(apperror.ValidationError, err.Error(), http.StatusBadRequest)
+}
+
+// emitTaskActivity формирует и сохраняет business-событие "задача опубликована"
+// в outbox внутри текущей транзакции (публикация атомарна со статусом).
+func emitTaskActivity(ctx context.Context, tx repository.Repository, taskID uuid.UUID) error {
+	version, err := tx.GetCurrentTaskVersion(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get task version for activity: %w", err)
+	}
+
+	return emitTaskActivityVersion(ctx, tx, taskID, version)
+}
+
+// emitTaskActivityVersion сохраняет событие публикации задачи по уже готовой
+// версии (используется и при смене статуса, и при одобрении собранного кандидата).
+func emitTaskActivityVersion(ctx context.Context, tx repository.Repository, taskID uuid.UUID, version domain.TaskVersion) error {
+	value, err := json.Marshal(domain.TaskPublishedEvent{
+		EventType:  "task.published",
+		OccurredAt: time.Now().UTC(),
+		TaskID:     taskID.String(),
+		Title:      version.Title,
+		TopicID:    version.TopicID,
+		TaskType:   string(version.TaskType),
+		Difficulty: string(version.Difficulty),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal task published event: %w", err)
+	}
+
+	return tx.InsertTaskActivityOutbox(ctx, domain.TaskActivityOutboxMessage{
+		ID:    uuid.New(),
+		Topic: domain.TaskActivityTopic,
+		Key:   taskID.String(),
+		Value: value,
+	})
 }

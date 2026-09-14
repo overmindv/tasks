@@ -60,6 +60,11 @@ func (r *candidateMemoryRepository) InsertTaskContent(_ context.Context, version
 	return nil
 }
 
+// InsertTaskActivityOutbox фиксирует business-событие публикации задачи.
+func (r *candidateMemoryRepository) InsertTaskActivityOutbox(_ context.Context, _ domain.TaskActivityOutboxMessage) error {
+	return nil
+}
+
 // SetCurrentTaskVersion связывает агрегат с опубликованной версией.
 func (r *candidateMemoryRepository) SetCurrentTaskVersion(_ context.Context, _ uuid.UUID, versionID, _ uuid.UUID) error {
 	r.task.CurrentVersionID = &versionID
