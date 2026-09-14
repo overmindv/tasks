@@ -72,7 +72,13 @@ func Build(app *parker.App) error {
 	dispatcher := kafkaadapter.NewOutboxDispatcher(store, producer, cfg.OutboxPollInterval, app.Logger())
 	consumer := kafkaadapter.NewResultConsumer(consumerClient, codeSubmissionService, app.Logger())
 
+	// Второй диспетчер — business-события задач (task.published) через стандартную
+	// parker-таблицу outbox в топик активности ленты.
+	activityDispatcher := parker.NewOutboxDispatcher(parker.NewPgOutbox(pool), producer, cfg.OutboxPollInterval, app.Logger())
+	app.AddHealthCheck("kafka-activity", parker.HealthCheckFunc(producer.Ping))
+
 	app.AddRunnable("kafka-outbox", dispatcher.Run)
+	app.AddRunnable("task-activity-outbox", activityDispatcher.Run)
 	app.AddRunnable("kafka-results", func(ctx context.Context) error {
 		defer consumerClient.Close()
 		return consumer.Run(ctx)

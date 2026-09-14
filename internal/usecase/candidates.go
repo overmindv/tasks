@@ -165,6 +165,11 @@ func (s *CandidateService) Approve(ctx context.Context, id, actorID uuid.UUID, r
 		if err := tx.MarkCandidateApproved(ctx, candidate.ID, taskID, actorID, review.ExpectedRevision+1); err != nil {
 			return fmt.Errorf("mark candidate approved: %w", err)
 		}
+		// Одобренный кандидат сразу публикуется (задача создана с статусом published),
+		// поэтому эмитим бизнес-событие для ленты в той же транзакции.
+		if err := emitTaskActivityVersion(ctx, tx, taskID, version); err != nil {
+			return fmt.Errorf("emit task activity for approved candidate: %w", err)
+		}
 
 		return nil
 	})
