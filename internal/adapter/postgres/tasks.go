@@ -193,6 +193,10 @@ func (r *Postgres) ListTaskDetails(ctx context.Context, filter domain.TaskFilter
 	if filter.TopicID != nil {
 		condition = condition.AND(taskVersions.TopicID.EQ(jet.UUID(*filter.TopicID)))
 	}
+	if filter.Search != "" {
+		pattern := "%" + filter.Search + "%"
+		condition = condition.AND(jet.LOWER(taskVersions.Title).LIKE(jet.LOWER(jet.String(pattern))))
+	}
 	join := tasks.INNER_JOIN(taskVersions.Table, tasks.CurrentVersionID.EQ(taskVersions.ID))
 	statement := jet.SELECT(
 		tasks.ID,

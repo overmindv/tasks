@@ -145,6 +145,7 @@ type TaskFilter struct {
 	TaskType   *TaskType
 	Difficulty *Difficulty
 	TopicID    *uuid.UUID
+	Search     string
 	Limit      int
 	Offset     int
 }
