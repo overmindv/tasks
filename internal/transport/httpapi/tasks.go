@@ -3,6 +3,7 @@ package httpapi
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/overmindv/tasks/internal/apperror"
@@ -247,6 +248,7 @@ func taskFilter(r *http.Request, allowStatus bool) (domain.TaskFilter, error) {
 		}
 		filter.TopicID = &topicID
 	}
+	filter.Search = strings.TrimSpace(r.URL.Query().Get("search"))
 	filter.Limit, filter.Offset = domain.NormalizePagination(filter.Limit, filter.Offset)
 
 	return filter, nil
