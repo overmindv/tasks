@@ -23,6 +23,12 @@ const (
 	defaultWorkspaceBytes = 1048576
 	defaultPythonVersion  = "3.12"
 	defaultGoVersion      = "1.26"
+	// defaultExecutionMaxAttempts лимитирует число переотправок запуска в sandbox (включая первичную).
+	defaultExecutionMaxAttempts = 3
+	// defaultExecutionRetryGrace — окно, после которого reaper считает queued-запуск заброшенным.
+	defaultExecutionRetryGrace = 2 * time.Minute
+	// defaultExecutionReaperInterval — период опроса reaper'ом заброшенных запусков.
+	defaultExecutionReaperInterval = 30 * time.Second
 )
 
 type Config struct {
@@ -38,6 +44,9 @@ type Config struct {
 	ExecutionStdoutBytes    int
 	ExecutionStderrBytes    int
 	ExecutionWorkspaceBytes int
+	ExecutionMaxAttempts    int
+	ExecutionRetryGrace     time.Duration
+	ExecutionReaperInterval time.Duration
 	PythonVersion           string
 	GoVersion               string
 }
@@ -73,6 +82,18 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	maxAttempts, err := envInt("CODE_EXECUTION_MAX_ATTEMPTS", defaultExecutionMaxAttempts)
+	if err != nil {
+		return Config{}, err
+	}
+	retryGrace, err := envDuration("CODE_EXECUTION_RETRY_GRACE", defaultExecutionRetryGrace)
+	if err != nil {
+		return Config{}, err
+	}
+	reaperInterval, err := envDuration("CODE_EXECUTION_REAPER_INTERVAL", defaultExecutionReaperInterval)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
 		TaskHunterIngestToken:   strings.TrimSpace(os.Getenv("TASK_HUNTER_INGEST_TOKEN")),
@@ -87,6 +108,9 @@ func Load() (Config, error) {
 		ExecutionStdoutBytes:    stdoutBytes,
 		ExecutionStderrBytes:    stderrBytes,
 		ExecutionWorkspaceBytes: workspaceBytes,
+		ExecutionMaxAttempts:    maxAttempts,
+		ExecutionRetryGrace:     retryGrace,
+		ExecutionReaperInterval: reaperInterval,
 		PythonVersion:           env("CODE_EXECUTION_PYTHON_VERSION", defaultPythonVersion),
 		GoVersion:               env("CODE_EXECUTION_GO_VERSION", defaultGoVersion),
 	}
@@ -134,6 +158,15 @@ func (c Config) Validate() error {
 	}
 	if c.PythonVersion == "" || c.GoVersion == "" {
 		return errors.New("версии рантайма python и go не должны быть пустыми")
+	}
+	if c.ExecutionMaxAttempts < 1 {
+		return errors.New("CODE_EXECUTION_MAX_ATTEMPTS должен быть не меньше 1")
+	}
+	if c.ExecutionRetryGrace <= 0 {
+		return errors.New("CODE_EXECUTION_RETRY_GRACE должен быть положительным")
+	}
+	if c.ExecutionReaperInterval <= 0 {
+		return errors.New("CODE_EXECUTION_REAPER_INTERVAL должен быть положительным")
 	}
 
 	return nil

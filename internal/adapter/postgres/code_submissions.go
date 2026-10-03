@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -33,7 +34,9 @@ const codeSubmissionColumns = `
     cs.error_message,
     cs.created_at,
     cs.updated_at,
-    cs.completed_at`
+    cs.completed_at,
+    cs.attempts,
+    cs.next_attempt_at`
 
 // FindCodeSubmissionByIdempotency ищет программное решение пользователя по ключу запроса.
 func (r *Postgres) FindCodeSubmissionByIdempotency(ctx context.Context, userID, key uuid.UUID) (*domain.CodeSubmission, error) {
@@ -190,6 +193,60 @@ func (r *Postgres) CompleteCodeSubmission(ctx context.Context, result domain.Cod
 	return tag.RowsAffected() == 1, nil
 }
 
+// BumpCodeSubmissionAttempt увеличивает счётчик переотправки queued-запуска.
+// UPDATE защищён статусом и верхней границей попыток: false означает, что
+// запуск завершён конкурентно или попытки исчерпаны.
+func (r *Postgres) BumpCodeSubmissionAttempt(ctx context.Context, id uuid.UUID, maxAttempts int, nextAttemptAt time.Time) (bool, error) {
+	tag, err := r.query.Exec(ctx, `
+        UPDATE code_submissions
+        SET attempts = attempts + 1,
+            next_attempt_at = $3,
+            updated_at = now()
+        WHERE id = $1
+          AND status = $2
+          AND attempts < $4`,
+		id,
+		domain.CodeSubmissionStatusQueued,
+		nextAttemptAt,
+		maxAttempts,
+	)
+	if err != nil {
+		return false, fmt.Errorf("execute bump code submission attempt: %w", err)
+	}
+
+	return tag.RowsAffected() == 1, nil
+}
+
+// FindExpiredQueuedCodeSubmissions возвращает заброшенные реaper-а queued-запуски:
+// sandbox не ответил в течение окна next_attempt_at.
+func (r *Postgres) FindExpiredQueuedCodeSubmissions(ctx context.Context, limit int) ([]domain.CodeSubmission, error) {
+	query := `SELECT ` + codeSubmissionColumns + `
+        FROM code_submissions cs
+        INNER JOIN task_versions tv ON tv.id = cs.task_version_id
+        WHERE cs.status = $1
+          AND cs.next_attempt_at <= now()
+        ORDER BY cs.next_attempt_at, cs.created_at, cs.id
+        LIMIT $2`
+	rows, err := r.query.Query(ctx, query, domain.CodeSubmissionStatusQueued, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query expired queued code submissions: %w", err)
+	}
+	defer rows.Close()
+	items := make([]domain.CodeSubmission, 0, limit)
+	for rows.Next() {
+		item, scanErr := scanCodeSubmission(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan expired queued code submission: %w", scanErr)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate expired queued code submissions: %w", err)
+	}
+
+	return items, nil
+}
+
 // scanCodeSubmission декодирует строку решения вместе с типизированным JSON-результатом.
 func scanCodeSubmission(row pgx.Row) (domain.CodeSubmission, error) {
 	var submission domain.CodeSubmission
@@ -222,6 +279,8 @@ func scanCodeSubmission(row pgx.Row) (domain.CodeSubmission, error) {
 		&submission.CreatedAt,
 		&submission.UpdatedAt,
 		&submission.CompletedAt,
+		&submission.Attempts,
+		&submission.NextAttemptAt,
 	)
 	if err != nil {
 		return domain.CodeSubmission{}, err

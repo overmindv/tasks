@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository
 
-`tasks` — внутренний Go-сервис Overmindv для IT-тестов: административный CRUD задач, неизменяемое версионирование условий, публикация и проверка пользовательских решений. Первый MVP поддерживает `single_choice` и `multiple_choice`. Это сервис внутренней сети, не публикуется наружу.
+`tasks` — внутренний Go-сервис Overmindv для IT-тестов: административный CRUD задач, неизменяемое версионирование условий, публикация и проверка пользовательских решений. Типы задач: `single_choice`, `multiple_choice` и `programming` (асинхронное исполнение кода в `sandbox` через Kafka, см. `docs/architecture.md`). Это сервис внутренней сети, не публикуется наружу.
 
 **Важно:** проект имеет подробный `AGENTS.md` (правила слоёв, версионирование, безопасность, чекеры, миграции, Go-конвенции). Он обязателен к прочтению перед изменениями границ сервиса и при нетривиальных задачах — не дублируется здесь.
 
@@ -42,7 +42,7 @@ make ctest COMPONENT_TEST_DSN='postgres://postgres:postgres@localhost:5432/tasks
 - `internal/usecase` — оркестрация сценариев и транзакции. `TaskService` (CRUD, status, версии), `SubmissionService` (проверка прав, идемпотентность, запись результата одной транзакцией). Boundary транзакций — здесь (`Repository.WithinTransaction`).
 - `internal/repository` — persistence-интерфейс (`Repository`), независимый от реализации.
 - `internal/adapter/postgres` — pgx + типизированные **Jet expressions**; `schema.go` — структуры таблиц. Transport/adapter не вырабатывают доменные решения.
-- `internal/transport/httpapi` — DTO, Внутренний HTTP-роутинг (std `net/http`, Go 1.22 method-паттерны), `middleware.go` (request ID, безопасный access/log, recover). Transport DTO ≠ доменные модели.
+- `internal/transport/httpapi` — DTO, внутренний HTTP-роутинг (std `net/http`, Go 1.22 method-паттерны), проверки доверенного контекста (`requireUser`/`requireAdmin` в `http.go`). Liveness/readiness/metrics/middleware предоставляет parker. Transport DTO ≠ доменные модели.
 - `internal/apperror` — публичные/внутренние ошибки; внутр. детали мапятся в transport, SQL-детали не утекают.
 - `internal/config` — загрузка/валидация env на старте.
 

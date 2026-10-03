@@ -44,10 +44,10 @@ Transport DTO не используются как доменные или Postg
 1. Пользователь загружает ровно один UTF-8 файл `.py` или `.go` размером до 256 KiB и передаёт UUID idempotency key.
 2. Use case проверяет опубликованную programming-версию и формирует тесты только из открытых `examples`, у которых задан ожидаемый output.
 3. `code_submissions` и `code_submission_outbox` записываются одной PostgreSQL-транзакцией. HTTP сразу возвращает `202` и статус `queued`.
-4. Dispatcher публикует `code_execution.requested` в Kafka с ключом `execution_id`. После broker acknowledgement outbox payload и временная копия source в `code_submissions` атомарно очищаются.
-5. `sandbox` независимо читает request topic, безопасно запускает код и публикует финальный `code_execution.completed`. Реализация sandbox не входит в `tasks`.
-6. Consumer строго проверяет JSON и совпадение `submission_id`, `execution_id`, `correlation_id`, задачи и версии. Inbox record и финальный результат сохраняются одной транзакцией, затем Kafka offset подтверждается.
-7. Клиент опрашивает `GET /v1/code-submissions/{id}`. Возможны статусы `queued` и `completed`; финальный verdict никогда не вычисляется самим `tasks`.
+4. Dispatcher публикует request в Kafka topic `code-execution.requests.v1` с ключом `execution_id`. После broker acknowledgement payload outbox-сообщения очищается; исходный код решения в `code_submissions` намеренно сохраняется (возвращается в API детали запуска своей страницы).
+5. `sandbox` независимо читает request topic, безопасно запускает код и публикует результат в `code-execution.results.v1`. Реализация sandbox не входит в `tasks`.
+6. Consumer строго проверяет JSON и совпадение `submission_id`, `execution_id` и `task_id` с сохранённым запуском. Inbox record и финальный результат сохраняются одной транзакцией, затем Kafka offset подтверждается.
+7. Вердикт вычисляется самим `tasks` из вывода кейсов (sandbox возвращает только вывод и метаданные). Финальные verdict'ы — в allowlist `domain.IsFinalExecutionVerdict`; `infrastructure_error`/`checker_error` никогда не помечают решение как неверное. Инфраструктурные ошибки переотправляются до лимита `MaxAttempts`, затем завершаются как `infrastructure_error`; заброшенные `queued`-запуски переотправляет reaper. Клиент опрашивает `GET /v1/code-submissions/{id}`: статусы `queued` и `completed`.
 
 Доставка request events — at-least-once: после Kafka ack и до PostgreSQL mark возможен повтор. Стабильный `execution_id` позволяет sandbox дедуплицировать запуск. Result events дедуплицируются одновременно по Kafka topic/partition/offset и `event_id`. Невалидные сообщения записываются в inbox без payload и подтверждаются, чтобы не создавать poison-message loop.
 
