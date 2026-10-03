@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"log/slog"
+	"time"
 
 	"github.com/overmindv/parker"
 	postgresadapter "github.com/overmindv/tasks/internal/adapter/postgres"
@@ -48,6 +50,8 @@ func Build(app *parker.App) error {
 		RequestsTopic:    cfg.KafkaRequestsTopic,
 		TimeLimit:        cfg.CodeExecutionTimeout,
 		MemoryLimitBytes: cfg.CodeExecutionMemory,
+		MaxAttempts:      cfg.ExecutionMaxAttempts,
+		RetryGrace:       cfg.ExecutionRetryGrace,
 		PIDs:             cfg.ExecutionPIDs,
 		StdoutBytes:      cfg.ExecutionStdoutBytes,
 		StderrBytes:      cfg.ExecutionStderrBytes,
@@ -83,6 +87,36 @@ func Build(app *parker.App) error {
 		defer consumerClient.Close()
 		return consumer.Run(ctx)
 	})
+	app.AddRunnable("code-submission-reaper", func(ctx context.Context) error {
+		return runReaper(ctx, codeSubmissionService, cfg.ExecutionReaperInterval, app.Logger())
+	})
 
 	return nil
+}
+
+// runReaper периодически переотправляет заброшенные queued-запуски или завершает их
+// как infrastructure_error по исчерпании попыток. Транзиентные ошибки БД не роняют
+// сервис: после паузы прогон повторяется.
+func runReaper(ctx context.Context, service *usecase.CodeSubmissionService, interval time.Duration, logger *slog.Logger) error {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if err := service.RequeueStaleCodeSubmissions(ctx); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			logger.ErrorContext(ctx, "reaper: временная ошибка, повтор", "error", err, "retry_after", interval)
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(interval):
+			}
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
+	}
 }

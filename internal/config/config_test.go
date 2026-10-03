@@ -21,6 +21,9 @@ func TestConfigValidate(t *testing.T) {
 		ExecutionStdoutBytes:    32768,
 		ExecutionStderrBytes:    32768,
 		ExecutionWorkspaceBytes: 1048576,
+		ExecutionMaxAttempts:    3,
+		ExecutionRetryGrace:     time.Minute,
+		ExecutionReaperInterval: 30 * time.Second,
 		PythonVersion:           "3.12",
 		GoVersion:               "1.26",
 	}

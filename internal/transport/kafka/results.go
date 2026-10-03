@@ -22,6 +22,15 @@ type ResultConsumer struct {
 	logger  *slog.Logger
 }
 
+// resultHandler задаёт контракт приёма одного Kafka result event с точки зрения
+// consumer'а (реализуется *usecase.CodeSubmissionService). Инъекция интерфейса вместо
+// конкретного сервиса делает логику processResult тестируемой без реального
+// Kafka-кластера и PostgreSQL.
+type resultHandler interface {
+	HandleRunResult(ctx context.Context, metadata usecase.ExecutionMessageMetadata, result execution.RunResult) error
+	RejectResult(ctx context.Context, metadata usecase.ExecutionMessageMetadata, eventID *uuid.UUID, errorCode string) error
+}
+
 // NewResultConsumer создаёт обработчик result topic поверх настроенного group client.
 func NewResultConsumer(client *kgo.Client, service *usecase.CodeSubmissionService, logger *slog.Logger) *ResultConsumer {
 	return &ResultConsumer{
@@ -84,6 +93,14 @@ func (c *ResultConsumer) Run(ctx context.Context) error {
 
 // process валидирует событие либо сохраняет безопасную rejected inbox запись.
 func (c *ResultConsumer) process(ctx context.Context, record *kgo.Record) error {
+	return processResult(ctx, record, c.service, c.logger)
+}
+
+// processResult принимает решение по одному record: обработать результат, отклонить
+// невалидное/несовместимое событие (rejected inbox запись, commit-путь) либо вернуть
+// ошибку, чтобы Run повторил обработку (retry-путь при транзиентной ошибке сервиса).
+// Вынесена отдельно, чтобы покрыть все ветки unit-тестами на фейковом resultHandler.
+func processResult(ctx context.Context, record *kgo.Record, handler resultHandler, logger *slog.Logger) error {
 	metadata := usecase.ExecutionMessageMetadata{
 		Topic:         record.Topic,
 		Partition:     record.Partition,
@@ -93,10 +110,10 @@ func (c *ResultConsumer) process(ctx context.Context, record *kgo.Record) error 
 	result, err := execution.DecodeRunResult(record.Value)
 	if err != nil {
 		attemptID, errorCode := rejectedEnvelope(record.Value)
-		if rejectErr := c.service.RejectResult(ctx, metadata, attemptID, errorCode); rejectErr != nil {
+		if rejectErr := handler.RejectResult(ctx, metadata, attemptID, errorCode); rejectErr != nil {
 			return fmt.Errorf("persist rejected execution result: %w", rejectErr)
 		}
-		c.logger.WarnContext(ctx, "невалидный Kafka result event отклонён",
+		logger.WarnContext(ctx, "невалидный Kafka result event отклонён",
 			"topic", record.Topic,
 			"partition", record.Partition,
 			"offset", record.Offset,
@@ -105,16 +122,16 @@ func (c *ResultConsumer) process(ctx context.Context, record *kgo.Record) error 
 
 		return nil
 	}
-	if err := c.service.HandleRunResult(ctx, metadata, result); err != nil {
+	if err := handler.HandleRunResult(ctx, metadata, result); err != nil {
 		if usecase.IsPermanentResultError(err) {
 			var attemptID *uuid.UUID
 			if parsed, parseErr := uuid.Parse(result.AttemptID); parseErr == nil {
 				attemptID = &parsed
 			}
-			if rejectErr := c.service.RejectResult(ctx, metadata, attemptID, execution.InboxErrorInvalidEvent); rejectErr != nil {
+			if rejectErr := handler.RejectResult(ctx, metadata, attemptID, execution.InboxErrorInvalidEvent); rejectErr != nil {
 				return fmt.Errorf("persist mismatched execution result after %v: %w", err, rejectErr)
 			}
-			c.logger.WarnContext(ctx, "Kafka result event не соответствует запуску",
+			logger.WarnContext(ctx, "Kafka result event не соответствует запуску",
 				"submission_id", result.SubmissionID,
 				"attempt_id", result.AttemptID,
 				"topic", record.Topic,
@@ -127,7 +144,7 @@ func (c *ResultConsumer) process(ctx context.Context, record *kgo.Record) error 
 
 		return fmt.Errorf("handle execution result: %w", err)
 	}
-	c.logger.InfoContext(ctx, "Kafka result event обработан",
+	logger.InfoContext(ctx, "Kafka result event обработан",
 		"submission_id", result.SubmissionID,
 		"attempt_id", result.AttemptID,
 		"topic", record.Topic,
