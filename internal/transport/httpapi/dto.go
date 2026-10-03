@@ -115,7 +115,6 @@ type codeSubmissionResponse struct {
 	CorrelationID     string                       `json:"correlation_id"`
 	Language          string                       `json:"language"`
 	SourceFileName    string                       `json:"source_file_name"`
-	SourceCode        string                       `json:"source_code"`
 	Status            string                       `json:"status"`
 	Verdict           *domain.ExecutionVerdict     `json:"verdict,omitempty"`
 	Compilation       *domain.ExecutionPhaseResult `json:"compilation,omitempty"`
@@ -270,7 +269,6 @@ func responseCodeSubmission(submission domain.CodeSubmission) codeSubmissionResp
 		CorrelationID:     submission.CorrelationID.String(),
 		Language:          string(submission.Language),
 		SourceFileName:    submission.SourceFileName,
-		SourceCode:        submission.SourceCode,
 		Status:            string(submission.Status),
 		Verdict:           submission.Verdict,
 		Compilation:       submission.Compilation,
