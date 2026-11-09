@@ -62,6 +62,7 @@ func Build(app *parker.App) error {
 		},
 	})
 	candidateService := usecase.NewCandidateService(store)
+	progressService := usecase.NewProgressService(store)
 
 	httpapi.Register(
 		app.HTTP(),
@@ -72,6 +73,7 @@ func Build(app *parker.App) error {
 		app.Logger(),
 		cfg.TaskHunterIngestToken,
 	)
+	httpapi.RegisterProgress(app.HTTP(), progressService, app.Logger())
 
 	dispatcher := kafkaadapter.NewOutboxDispatcher(store, producer, cfg.OutboxPollInterval, app.Logger())
 	consumer := kafkaadapter.NewResultConsumer(consumerClient, codeSubmissionService, app.Logger())
