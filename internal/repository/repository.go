@@ -40,6 +40,12 @@ type Repository interface {
 	ReleaseOutboxMessage(ctx context.Context, id, claimToken uuid.UUID, availableAt time.Time, lastError string) error
 	InsertExecutionInbox(ctx context.Context, record domain.ExecutionInboxRecord) (bool, error)
 	CompleteCodeSubmission(ctx context.Context, result domain.CodeSubmission) (bool, error)
+	// BumpCodeSubmissionAttempt увеличивает счётчик переотправки queued-запуска
+	// (false — если запуск завершён конкурентно или попытки исчерпаны).
+	BumpCodeSubmissionAttempt(ctx context.Context, id uuid.UUID, maxAttempts int, nextAttemptAt time.Time) (bool, error)
+	// FindExpiredQueuedCodeSubmissions возвращает queued-запуски, чьё окно
+	// следующей попытки истекло (sandbox не ответил).
+	FindExpiredQueuedCodeSubmissions(ctx context.Context, limit int) ([]domain.CodeSubmission, error)
 	InsertCandidate(ctx context.Context, candidate domain.TaskCandidate) (bool, error)
 	GetCandidate(ctx context.Context, id uuid.UUID, lock bool) (domain.TaskCandidate, error)
 	ListCandidates(ctx context.Context, filter domain.CandidateFilter) ([]domain.TaskCandidate, error)

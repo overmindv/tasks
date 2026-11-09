@@ -94,9 +94,13 @@ type CodeSubmission struct {
 	Execution         *ExecutionPhaseResult
 	Tests             []ExecutionTestResult
 	Failure           *ExecutionFailure
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	CompletedAt       *time.Time
+	// Attempts — число переотправок запуска в sandbox (начиная с 1).
+	Attempts int
+	// NextAttemptAt — момент, когда reaper посчитает queued-запуск заброшенным.
+	NextAttemptAt time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	CompletedAt   *time.Time
 }
 
 // CodeSubmissionFilter задаёт фильтр истории программных решений пользователя.

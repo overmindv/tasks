@@ -34,6 +34,11 @@ type CodeExecutionPolicy struct {
 	TimeLimit        time.Duration
 	MemoryLimitBytes int64
 
+	// MaxAttempts лимитирует переотправки запуска в sandbox (включая первичную).
+	MaxAttempts int
+	// RetryGrace — окно, после которого reaper считает queued-запуск заброшенным.
+	RetryGrace time.Duration
+
 	// Sandbox-совместимые лимиты исполнения.
 	PIDs           int
 	StdoutBytes    int
@@ -135,37 +140,13 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 			SourceFileName:    input.SourceFileName,
 			SourceCode:        input.SourceCode,
 			Status:            domain.CodeSubmissionStatusQueued,
+			Attempts:          1,
+			NextAttemptAt:     now,
 			Tests:             []domain.ExecutionTestResult{},
 			CreatedAt:         now,
 			UpdatedAt:         now,
 		}
-		request := execution.RunRequest{
-			SchemaVersion: execution.RequestSchemaVersion,
-			SubmissionID:  submission.ID.String(),
-			AttemptID:     submission.ExecutionID.String(),
-			UserID:        userID.String(),
-			TaskID:        taskID.String(),
-			Language: execution.Language{
-				ID:      string(input.Language),
-				Version: languageVersion(s.policy, input.Language),
-			},
-			Code: execution.Code{
-				Entrypoint: input.SourceFileName,
-				Files: []execution.SourceFile{
-					{
-						Path:       input.SourceFileName,
-						ContentB64: base64.StdEncoding.EncodeToString([]byte(input.SourceCode)),
-					},
-				},
-			},
-			Execution: &execution.ExecutionSpec{
-				Mode:   execution.ExecutionMode,
-				Inputs: exampleInputs(open),
-			},
-			Limits:    s.executionLimits(input.Language),
-			TraceID:   submission.CorrelationID.String(),
-			CreatedAt: now,
-		}
+		request := s.buildRunRequest(submission, open, now)
 		payload, err := execution.EncodeRunRequest(request)
 		if err != nil {
 			return fmt.Errorf("encode execution request: %w", err)
@@ -197,6 +178,38 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 	}
 
 	return submission, nil
+}
+
+// buildRunRequest собирает запрос на исполнение для уже сохранённого решения:
+// используется и при Submit, и при переотправке после инфраструктурной ошибки.
+func (s *CodeSubmissionService) buildRunRequest(submission domain.CodeSubmission, open []domain.TaskExample, now time.Time) execution.RunRequest {
+	return execution.RunRequest{
+		SchemaVersion: execution.RequestSchemaVersion,
+		SubmissionID:  submission.ID.String(),
+		AttemptID:     submission.ExecutionID.String(),
+		UserID:        submission.UserID.String(),
+		TaskID:        submission.TaskID.String(),
+		Language: execution.Language{
+			ID:      string(submission.Language),
+			Version: languageVersion(s.policy, submission.Language),
+		},
+		Code: execution.Code{
+			Entrypoint: submission.SourceFileName,
+			Files: []execution.SourceFile{
+				{
+					Path:       submission.SourceFileName,
+					ContentB64: base64.StdEncoding.EncodeToString([]byte(submission.SourceCode)),
+				},
+			},
+		},
+		Execution: &execution.ExecutionSpec{
+			Mode:   execution.ExecutionMode,
+			Inputs: exampleInputs(open),
+		},
+		Limits:    s.executionLimits(submission.Language),
+		TraceID:   submission.CorrelationID.String(),
+		CreatedAt: now,
+	}
 }
 
 // Get возвращает состояние запуска владельцу или администратору.
@@ -254,6 +267,11 @@ func (s *CodeSubmissionService) HandleRunResult(ctx context.Context, metadata Ex
 			return apperror.New(apperror.ExecutionResultMismatch, "версия задачи результата не найдена", http.StatusConflict)
 		}
 		verdict, tests, failure := verdictFromRunResult(result, openExamples(version.Examples))
+		// Инфраструктурная ошибка песочницы — не приговор для пользователя: пока не
+		// исчерпаны попытки, переотправляем запуск через outbox вместо завершения.
+		if codeSubmissionRetryable(verdict, result) && current.Attempts < s.policy.MaxAttempts {
+			return s.requeue(ctx, tx, current, version, time.Now().UTC())
+		}
 		completedAt := result.CreatedAt.UTC()
 		executionPhase := executionPhaseFromResult(result)
 		updated, err := tx.CompleteCodeSubmission(ctx, domain.CodeSubmission{
@@ -273,7 +291,9 @@ func (s *CodeSubmissionService) HandleRunResult(ctx context.Context, metadata Ex
 			return fmt.Errorf("complete code submission: %w", err)
 		}
 		if !updated {
-			return errors.New("ожидающее решение не было завершено")
+			// Конкурентное завершение другим обработчиком: результат устарел.
+			// Permanent error — иначе consumer бесконечно ретраит poison-сообщение.
+			return apperror.New(apperror.ExecutionResultMismatch, "запуск завершён конкурирующим обработчиком", http.StatusConflict)
 		}
 
 		return nil
@@ -302,6 +322,123 @@ func IsPermanentResultError(err error) bool {
 	var public *apperror.Error
 
 	return errors.As(err, &public) && public.Code == apperror.ExecutionResultMismatch
+}
+
+// codeSubmissionRetryable говорит, стоит ли переотправлять запуск после ответа sandbox.
+// Инфраструктурная ошибка по своей природе переотправляема; checker_error — только
+// когда песочница явно пометила её как retryable.
+func codeSubmissionRetryable(verdict domain.ExecutionVerdict, result execution.RunResult) bool {
+	switch verdict {
+	case domain.ExecutionVerdictInfrastructureError:
+		return true
+	case domain.ExecutionVerdictCheckerError:
+		return result.Error != nil && result.Error.Retryable
+	default:
+		return false
+	}
+}
+
+// requeue переотправляет запуск в sandbox в той же транзакции обработки результата:
+// увеличивает счётчик попыток, откладывает окно reaper-а и ставит новый outbox-event.
+// Возвращает permanent mismatch, если запуск завершён конкурирующим обработчиком.
+func (s *CodeSubmissionService) requeue(ctx context.Context, tx repository.Repository, current domain.CodeSubmission, version domain.TaskVersion, at time.Time) error {
+	open := openExamples(version.Examples)
+	if len(open) == 0 {
+		return apperror.New(apperror.ExecutionResultMismatch, "версия задачи не содержит открытых примеров для переотправки", http.StatusConflict)
+	}
+	bumped, err := tx.BumpCodeSubmissionAttempt(ctx, current.ID, s.policy.MaxAttempts, at.Add(s.policy.RetryGrace))
+	if err != nil {
+		return fmt.Errorf("bump code submission attempt: %w", err)
+	}
+	if !bumped {
+		return apperror.New(apperror.ExecutionResultMismatch, "запуск завершён конкурирующим обработчиком", http.StatusConflict)
+	}
+	request := s.buildRunRequest(current, open, at)
+	payload, err := execution.EncodeRunRequest(request)
+	if err != nil {
+		return fmt.Errorf("encode retry execution request: %w", err)
+	}
+	if err := tx.InsertOutboxMessage(ctx, domain.OutboxMessage{
+		ID:          uuid.New(),
+		AggregateID: current.ID,
+		Topic:       s.policy.RequestsTopic,
+		MessageKey:  current.ExecutionID.String(),
+		Payload:     payload,
+		AvailableAt: at,
+		CreatedAt:   at,
+	}); err != nil {
+		return fmt.Errorf("insert retry execution request into outbox: %w", err)
+	}
+
+	return nil
+}
+
+// RequeueStaleCodeSubmissions обрабатывает queued-запуски, на которые sandbox так и не
+// ответил: переотправляет их до MaxAttempts, затем завершает как infrastructure_error
+// (решение пользователя не помечается неверным). Вызывается reaper-ом периодически.
+func (s *CodeSubmissionService) RequeueStaleCodeSubmissions(ctx context.Context) error {
+	const reaperBatchSize = 50
+
+	stale, err := s.repository.FindExpiredQueuedCodeSubmissions(ctx, reaperBatchSize)
+	if err != nil {
+		return fmt.Errorf("find expired queued code submissions: %w", err)
+	}
+	for _, candidate := range stale {
+		if err := s.requeueOrFailOne(ctx, candidate); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// requeueOrFailOne решает судьбу одного заброшенного запуска в отдельной транзакции:
+// завершает при исчерпании попыток, иначе переотправляет.
+func (s *CodeSubmissionService) requeueOrFailOne(ctx context.Context, stale domain.CodeSubmission) error {
+	return s.repository.WithinTransaction(ctx, func(tx repository.Repository) error {
+		current, err := tx.GetCodeSubmission(ctx, stale.ID)
+		if err != nil {
+			return fmt.Errorf("get stale code submission: %w", err)
+		}
+		if current.Status != domain.CodeSubmissionStatusQueued {
+			return nil
+		}
+		if current.Attempts >= s.policy.MaxAttempts {
+			verdict := domain.ExecutionVerdictInfrastructureError
+			failure := &domain.ExecutionFailure{
+				Code:    "attempts_exhausted",
+				Message: "песочница не ответила за отведённое число попыток",
+			}
+			completedAt := time.Now().UTC()
+			updated, err := tx.CompleteCodeSubmission(ctx, domain.CodeSubmission{
+				ID:            current.ID,
+				TaskID:        current.TaskID,
+				TaskVersionID: current.TaskVersionID,
+				ExecutionID:   current.ExecutionID,
+				CorrelationID: current.CorrelationID,
+				Status:        domain.CodeSubmissionStatusCompleted,
+				Verdict:       &verdict,
+				Tests:         []domain.ExecutionTestResult{},
+				Failure:       failure,
+				CompletedAt:   &completedAt,
+			})
+			if err != nil {
+				return fmt.Errorf("complete stalled code submission: %w", err)
+			}
+			if !updated {
+				// Конкурентно завершён (пришёл запоздавший результат) — не ошибка.
+				return nil
+			}
+
+			return nil
+		}
+		version, err := tx.GetTaskVersion(ctx, current.TaskID, current.TaskVersionID)
+		if err != nil {
+			return fmt.Errorf("get stale code submission version: %w", err)
+		}
+
+		return s.requeue(ctx, tx, current, version, time.Now().UTC())
+	})
 }
 
 // executionLimits строит sandbox-совместимые лимиты с учётом допустимых границ песочницы.
@@ -427,6 +564,10 @@ func caseVerdict(run execution.CaseRunResult, expectedOutput string) domain.Exec
 		return domain.ExecutionVerdictOutputLimitExceeded
 	case execution.ResultStatusRuntimeError:
 		return domain.ExecutionVerdictRuntimeError
+	case execution.ResultStatusInternalError:
+		// Внутренняя ошибка песочницы на кейсе — это инфраструктурная проблема,
+		// а не несовпадение вывода: решение нельзя помечать wrong_answer.
+		return domain.ExecutionVerdictInfrastructureError
 	}
 	if run.ExitCode != nil && *run.ExitCode != 0 {
 		return domain.ExecutionVerdictRuntimeError
@@ -449,6 +590,10 @@ func expectedAt(expected []domain.TaskExample, index int) string {
 // verdictPriority задаёт порядок значимости вердиктов: выше — серьёзнее.
 func verdictPriority(verdict domain.ExecutionVerdict) int {
 	switch verdict {
+	// Инфраструктурная ошибка — самый серьёзный вердикт: она отменяет
+	// любую ошибку, вызванную поведением пользовательского кода.
+	case domain.ExecutionVerdictInfrastructureError:
+		return 6
 	case domain.ExecutionVerdictOutputLimitExceeded:
 		return 5
 	case domain.ExecutionVerdictMemoryLimitExceeded:

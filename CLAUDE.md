@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository
 
-`tasks` — внутренний Go-сервис Overmindv для IT-тестов: административный CRUD задач, неизменяемое версионирование условий, публикация и проверка пользовательских решений. Первый MVP поддерживает `single_choice` и `multiple_choice`. Это сервис внутренней сети, не публикуется наружу.
+`tasks` — внутренний Go-сервис Overmindv для IT-тестов: административный CRUD задач, неизменяемое версионирование условий, публикация и проверка пользовательских решений. Типы задач: `single_choice`, `multiple_choice` и `programming` (асинхронное исполнение кода в `sandbox` через Kafka, см. `docs/architecture.md`). Это сервис внутренней сети, не публикуется наружу.
 
 **Важно:** проект имеет подробный `AGENTS.md` (правила слоёв, версионирование, безопасность, чекеры, миграции, Go-конвенции). Он обязателен к прочтению перед изменениями границ сервиса и при нетривиальных задачах — не дублируется здесь.
 
@@ -42,7 +42,7 @@ make ctest COMPONENT_TEST_DSN='postgres://postgres:postgres@localhost:5432/tasks
 - `internal/usecase` — оркестрация сценариев и транзакции. `TaskService` (CRUD, status, версии), `SubmissionService` (проверка прав, идемпотентность, запись результата одной транзакцией). Boundary транзакций — здесь (`Repository.WithinTransaction`).
 - `internal/repository` — persistence-интерфейс (`Repository`), независимый от реализации.
 - `internal/adapter/postgres` — pgx + типизированные **Jet expressions**; `schema.go` — структуры таблиц. Transport/adapter не вырабатывают доменные решения.
-- `internal/transport/httpapi` — DTO, Внутренний HTTP-роутинг (std `net/http`, Go 1.22 method-паттерны), `middleware.go` (request ID, безопасный access/log, recover). Transport DTO ≠ доменные модели.
+- `internal/transport/httpapi` — DTO, внутренний HTTP-роутинг (std `net/http`, Go 1.22 method-паттерны), проверки доверенного контекста (`requireUser`/`requireAdmin` в `http.go`). Liveness/readiness/metrics/middleware предоставляет parker. Transport DTO ≠ доменные модели.
 - `internal/apperror` — публичные/внутренние ошибки; внутр. детали мапятся в transport, SQL-детали не утекают.
 - `internal/config` — загрузка/валидация env на старте.
 
@@ -67,3 +67,18 @@ make ctest COMPONENT_TEST_DSN='postgres://postgres:postgres@localhost:5432/tasks
 - Архитектура: `docs/architecture.md`; изменения связанных сервисов: `docs/integrations/`.
 - Миграции — append-only в `migrations/`, не менять применённые.
 - Смена контракта: проверить производителей/потребителей, обратную совместимость, обновить сгенерированный код и контракт-тесты.
+
+## Общий agent harness
+
+Для изменения поведения прочитай `../docs/harness/README.md` и релевантную
+спецификацию в `../docs/openspec/`. Это sibling-репозиторий `overmindv/docs`,
+а не каталог документации этого сервиса. При отдельном checkout и отсутствии
+соседа используй локальные правила; нехватку сквозного контекста укажи явно.
+
+- Перед работой зафиксируй `git status --short`; сохраняй чужие незавершённые изменения.
+- Работай одним проверяемым срезом; рутинные обратимые решения принимай самостоятельно.
+- На смену контракта найди производителей/потребителей и проверь их совместимость.
+- Пользовательские сценарии студента и автора/модератора имеют равный приоритет.
+- Проверки: `make -C ../infra agent-verify SERVICE=tasks DRY_RUN=1` показывает команды.
+- В конце приведи фактические результаты и непроверенные места; сохрани следующий шаг.
+- Не публикуй, не очищай БД и не отправляй изменения автоматически.
