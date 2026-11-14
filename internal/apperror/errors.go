@@ -21,6 +21,7 @@ const (
 	CandidateNotFound         = "CANDIDATE_NOT_FOUND"
 	CandidateRevisionConflict = "CANDIDATE_REVISION_CONFLICT"
 	CandidateNotPending       = "CANDIDATE_NOT_PENDING"
+	ProblemListNotFound       = "PROBLEM_LIST_NOT_FOUND"
 	TaskTypeNotSubmittable    = "TASK_TYPE_NOT_SUBMITTABLE"
 	InternalError             = "INTERNAL_ERROR"
 )

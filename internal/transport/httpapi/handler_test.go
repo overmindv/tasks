@@ -148,6 +148,7 @@ func testHandler(repo *handlerRepository) http.Handler {
 			MemoryLimitBytes: 64 * 1024 * 1024,
 		}),
 		usecase.NewCandidateService(repo),
+		usecase.NewProblemListService(repo),
 		logger,
 		"test-ingest-token",
 	)

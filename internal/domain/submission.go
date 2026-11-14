@@ -13,6 +13,7 @@ type Submission struct {
 	TaskID              uuid.UUID
 	TaskVersionID       uuid.UUID
 	TaskVersionNumber   int
+	TaskTitle           string
 	IdempotencyKey      uuid.UUID
 	RequestHash         string
 	Verdict             Verdict

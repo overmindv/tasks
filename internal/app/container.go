@@ -63,6 +63,7 @@ func Build(app *parker.App) error {
 	})
 	candidateService := usecase.NewCandidateService(store)
 	progressService := usecase.NewProgressService(store)
+	problemListService := usecase.NewProblemListService(store)
 
 	httpapi.Register(
 		app.HTTP(),
@@ -70,6 +71,7 @@ func Build(app *parker.App) error {
 		submissionService,
 		codeSubmissionService,
 		candidateService,
+		problemListService,
 		app.Logger(),
 		cfg.TaskHunterIngestToken,
 	)

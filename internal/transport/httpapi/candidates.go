@@ -17,20 +17,27 @@ type candidateImportRequest struct {
 }
 
 type candidateImportInput struct {
-	ExternalID        string         `json:"external_id"`
-	SourceID          string         `json:"source_id"`
-	SourceName        string         `json:"source_name"`
-	SourceURL         string         `json:"source_url"`
-	SourceHash        string         `json:"source_hash"`
-	SourcePublishedAt *time.Time     `json:"source_published_at"`
-	RetrievedAt       time.Time      `json:"retrieved_at"`
-	CollectionJobID   string         `json:"collection_job_id"`
-	Title             string         `json:"title"`
-	Statement         string         `json:"statement"`
-	Difficulty        string         `json:"difficulty"`
-	Tags              []string       `json:"tags"`
-	Examples          []exampleInput `json:"examples"`
-	Constraints       []string       `json:"constraints"`
+	ExternalID        string             `json:"external_id"`
+	SourceID          string             `json:"source_id"`
+	SourceName        string             `json:"source_name"`
+	SourceURL         string             `json:"source_url"`
+	SourceHash        string             `json:"source_hash"`
+	SourcePublishedAt *time.Time         `json:"source_published_at"`
+	RetrievedAt       time.Time          `json:"retrieved_at"`
+	CollectionJobID   string             `json:"collection_job_id"`
+	Title             string             `json:"title"`
+	Statement         string             `json:"statement"`
+	Difficulty        string             `json:"difficulty"`
+	Tags              []string           `json:"tags"`
+	Examples          []exampleInput     `json:"examples"`
+	Constraints       []string           `json:"constraints"`
+	ProblemList       *problemListImport `json:"problem_list"`
+}
+
+type problemListImport struct {
+	Name      string `json:"name"`
+	SourceID  string `json:"source_id"`
+	SourceURL string `json:"source_url"`
 }
 
 type candidateReviewInput struct {
@@ -61,6 +68,7 @@ type candidateResponse struct {
 	RetrievedAt       time.Time      `json:"retrieved_at"`
 	CollectionJobID   string         `json:"collection_job_id"`
 	TopicID           *string        `json:"topic_id"`
+	ProblemListID     *string        `json:"problem_list_id"`
 	Title             string         `json:"title"`
 	Statement         string         `json:"statement"`
 	Difficulty        string         `json:"difficulty"`
@@ -95,7 +103,7 @@ func (h *Handler) importCandidates(w http.ResponseWriter, r *http.Request) {
 
 			return
 		}
-		items = append(items, domain.CandidateImport{
+		entry := domain.CandidateImport{
 			ExternalID: item.ExternalID, SourceID: item.SourceID, SourceName: item.SourceName,
 			SourceURL: item.SourceURL, SourceHash: item.SourceHash, SourcePublishedAt: item.SourcePublishedAt,
 			RetrievedAt: item.RetrievedAt, CollectionJobID: jobID, Title: item.Title, Statement: item.Statement,
@@ -103,7 +111,15 @@ func (h *Handler) importCandidates(w http.ResponseWriter, r *http.Request) {
 			Examples: lo.Map(item.Examples, func(example exampleInput, _ int) domain.TaskExample {
 				return domain.TaskExample{Input: example.Input, Output: example.Output, Explanation: example.Explanation}
 			}),
-		})
+		}
+		if item.ProblemList != nil {
+			entry.ProblemList = &domain.ProblemListImport{
+				Name:      item.ProblemList.Name,
+				SourceID:  item.ProblemList.SourceID,
+				SourceURL: item.ProblemList.SourceURL,
+			}
+		}
+		items = append(items, entry)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": h.candidates.ImportBatch(r.Context(), items)})
 }
@@ -137,6 +153,15 @@ func (h *Handler) listCandidates(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		filter.Difficulty = &difficulty
+	}
+	if value := r.URL.Query().Get("problem_list_id"); value != "" {
+		listID, err := uuid.Parse(value)
+		if err != nil {
+			writeError(w, apperror.New(apperror.ValidationError, "problem_list_id должен быть UUID", http.StatusBadRequest), h.logger)
+
+			return
+		}
+		filter.ProblemListID = &listID
 	}
 	filter.Limit, filter.Offset = domain.NormalizePagination(filter.Limit, filter.Offset)
 	items, err := h.candidates.List(r.Context(), filter)
@@ -274,7 +299,7 @@ func responseCandidate(item domain.TaskCandidate) candidateResponse {
 		ID: item.ID.String(), Status: string(item.Status), Revision: item.Revision, ExternalID: item.ExternalID,
 		SourceID: item.SourceID, SourceName: item.SourceName, SourceURL: item.SourceURL,
 		SourcePublishedAt: item.SourcePublishedAt, RetrievedAt: item.RetrievedAt, CollectionJobID: item.CollectionJobID.String(),
-		TopicID: optionalUUIDString(item.TopicID), Title: item.Title, Statement: item.Statement,
+		TopicID: optionalUUIDString(item.TopicID), ProblemListID: optionalUUIDString(item.ProblemListID), Title: item.Title, Statement: item.Statement,
 		Difficulty: string(item.Difficulty), Tags: item.Tags, Constraints: item.Constraints,
 		Examples: lo.Map(item.Examples, func(example domain.TaskExample, _ int) exampleInput {
 			return exampleInput{Input: example.Input, Output: example.Output, Explanation: example.Explanation}

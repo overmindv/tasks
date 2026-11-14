@@ -15,24 +15,26 @@ type Router interface {
 
 // Handler объединяет зависимости внутреннего HTTP API.
 type Handler struct {
-	tasks       *usecase.TaskService
-	submissions *usecase.SubmissionService
-	code        *usecase.CodeSubmissionService
-	candidates  *usecase.CandidateService
-	logger      *slog.Logger
-	ingestToken string
+	tasks        *usecase.TaskService
+	submissions  *usecase.SubmissionService
+	code         *usecase.CodeSubmissionService
+	candidates   *usecase.CandidateService
+	problemLists *usecase.ProblemListService
+	logger       *slog.Logger
+	ingestToken  string
 }
 
 // Register регистрирует бизнес-маршруты /v1/* на роутер parker.
 // Liveness/readiness/metrics/middleware предоставляет parker.
-func Register(router Router, tasksService *usecase.TaskService, submissionService *usecase.SubmissionService, codeSubmissionService *usecase.CodeSubmissionService, candidateService *usecase.CandidateService, logger *slog.Logger, ingestToken string) {
+func Register(router Router, tasksService *usecase.TaskService, submissionService *usecase.SubmissionService, codeSubmissionService *usecase.CodeSubmissionService, candidateService *usecase.CandidateService, problemListService *usecase.ProblemListService, logger *slog.Logger, ingestToken string) {
 	handler := &Handler{
-		tasks:       tasksService,
-		submissions: submissionService,
-		code:        codeSubmissionService,
-		candidates:  candidateService,
-		logger:      logger,
-		ingestToken: ingestToken,
+		tasks:        tasksService,
+		submissions:  submissionService,
+		code:         codeSubmissionService,
+		candidates:   candidateService,
+		problemLists: problemListService,
+		logger:       logger,
+		ingestToken:  ingestToken,
 	}
 
 	// Административный CRUD и lifecycle тестов (требует роль admin/superuser).
@@ -48,6 +50,8 @@ func Register(router Router, tasksService *usecase.TaskService, submissionServic
 	router.HandleFunc("POST /v1/admin/task-candidates/{id}/approve", handler.approveCandidate)
 	router.HandleFunc("POST /v1/admin/task-candidates/{id}/reject", handler.rejectCandidate)
 	router.HandleFunc("POST /v1/internal/task-candidates/batch", handler.importCandidates)
+	router.HandleFunc("GET /v1/admin/problem-lists", handler.listProblemLists)
+	router.HandleFunc("GET /v1/admin/problem-lists/{id}", handler.getProblemList)
 	router.HandleFunc("GET /v1/tasks", handler.listPublishedTasks)
 	router.HandleFunc("GET /v1/tasks/{id}", handler.getPublishedTask)
 

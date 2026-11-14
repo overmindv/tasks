@@ -14,7 +14,7 @@ import (
 )
 
 const candidateColumns = `id, status, revision, external_id, source_id, source_name, source_url, source_hash,
-source_published_at, retrieved_at, collection_job_id, topic_id, title, statement, difficulty,
+source_published_at, retrieved_at, collection_job_id, topic_id, title, statement, difficulty, problem_list_id,
 approved_task_id, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at`
 
 type rowScanner interface {
@@ -25,11 +25,11 @@ type rowScanner interface {
 func (r *Postgres) InsertCandidate(ctx context.Context, candidate domain.TaskCandidate) (bool, error) {
 	_, err := r.query.Exec(ctx, `INSERT INTO task_candidates (
 id, status, revision, external_id, source_id, source_name, source_url, source_hash, source_published_at,
-retrieved_at, collection_job_id, title, statement, difficulty
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+retrieved_at, collection_job_id, title, statement, difficulty, problem_list_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 		candidate.ID, candidate.Status, candidate.Revision, candidate.ExternalID, candidate.SourceID,
 		candidate.SourceName, candidate.SourceURL, candidate.SourceHash, candidate.SourcePublishedAt,
-		candidate.RetrievedAt, candidate.CollectionJobID, candidate.Title, candidate.Statement, candidate.Difficulty)
+		candidate.RetrievedAt, candidate.CollectionJobID, candidate.Title, candidate.Statement, candidate.Difficulty, candidate.ProblemListID)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -79,6 +79,9 @@ func (r *Postgres) ListCandidates(ctx context.Context, filter domain.CandidateFi
 	}
 	if filter.Difficulty != nil {
 		add("difficulty = $%d", *filter.Difficulty)
+	}
+	if filter.ProblemListID != nil {
+		add("problem_list_id = $%d", *filter.ProblemListID)
 	}
 	query := `SELECT ` + candidateColumns + ` FROM task_candidates`
 	if len(clauses) > 0 {
@@ -261,8 +264,9 @@ func scanCandidate(row rowScanner) (domain.TaskCandidate, error) {
 	err := row.Scan(&candidate.ID, &status, &candidate.Revision, &candidate.ExternalID, &candidate.SourceID,
 		&candidate.SourceName, &candidate.SourceURL, &candidate.SourceHash, &candidate.SourcePublishedAt,
 		&candidate.RetrievedAt, &candidate.CollectionJobID, &candidate.TopicID, &candidate.Title,
-		&candidate.Statement, &candidate.Difficulty, &candidate.ApprovedTaskID, &candidate.ReviewedBy,
-		&candidate.ReviewedAt, &candidate.RejectionReason, &candidate.CreatedAt, &candidate.UpdatedAt)
+		&candidate.Statement, &candidate.Difficulty, &candidate.ProblemListID, &candidate.ApprovedTaskID,
+		&candidate.ReviewedBy, &candidate.ReviewedAt, &candidate.RejectionReason, &candidate.CreatedAt,
+		&candidate.UpdatedAt)
 	candidate.Status = domain.CandidateStatus(status)
 
 	return candidate, err

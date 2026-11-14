@@ -37,6 +37,7 @@ type TaskCandidate struct {
 	Tags              []string
 	Examples          []TaskExample
 	Constraints       []string
+	ProblemListID     *uuid.UUID
 	ApprovedTaskID    *uuid.UUID
 	ReviewedBy        *uuid.UUID
 	ReviewedAt        *time.Time
@@ -61,6 +62,7 @@ type CandidateImport struct {
 	Tags              []string
 	Examples          []TaskExample
 	Constraints       []string
+	ProblemList       *ProblemListImport
 }
 
 // CandidateReview содержит редактируемые администратором поля кандидата.
@@ -77,11 +79,12 @@ type CandidateReview struct {
 
 // CandidateFilter задаёт административные фильтры очереди.
 type CandidateFilter struct {
-	Status     *CandidateStatus
-	SourceID   string
-	Difficulty *Difficulty
-	Limit      int
-	Offset     int
+	Status        *CandidateStatus
+	SourceID      string
+	Difficulty    *Difficulty
+	ProblemListID *uuid.UUID
+	Limit         int
+	Offset        int
 }
 
 // NormalizeCandidateImport очищает импортированные данные до проверки.
@@ -106,6 +109,10 @@ func NormalizeCandidateImport(input CandidateImport) CandidateImport {
 	input.Tags = normalized.Tags
 	input.Examples = normalized.Examples
 	input.Constraints = normalized.Constraints
+	if input.ProblemList != nil {
+		list := NormalizeProblemListImport(*input.ProblemList)
+		input.ProblemList = &list
+	}
 
 	return input
 }
@@ -117,6 +124,11 @@ func ValidateCandidateImport(input CandidateImport) error {
 	}
 	if input.CollectionJobID == uuid.Nil || input.RetrievedAt.IsZero() {
 		return fmt.Errorf("collection_job_id и retrieved_at обязательны")
+	}
+	if input.ProblemList != nil {
+		if err := ValidateProblemListImport(*input.ProblemList); err != nil {
+			return err
+		}
 	}
 
 	return ValidateTaskInput(TaskInput{

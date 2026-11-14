@@ -46,6 +46,14 @@ func (s *CandidateService) ImportBatch(ctx context.Context, inputs []domain.Cand
 		candidate := candidateFromImport(input)
 		created := false
 		err := s.repository.WithinTransaction(ctx, func(tx repository.Repository) error {
+			// Кандидаты из одного problem-list связываются со списком идемпотентно.
+			if input.ProblemList != nil {
+				listID, listErr := tx.GetOrCreateProblemList(ctx, *input.ProblemList)
+				if listErr != nil {
+					return listErr
+				}
+				candidate.ProblemListID = &listID
+			}
 			var insertErr error
 			created, insertErr = tx.InsertCandidate(ctx, candidate)
 
@@ -161,6 +169,12 @@ func (s *CandidateService) Approve(ctx context.Context, id, actorID uuid.UUID, r
 		}
 		if err := tx.SetCurrentTaskVersion(ctx, taskID, versionID, actorID); err != nil {
 			return fmt.Errorf("set approved task version: %w", err)
+		}
+		// Одобренный кандидат из problem-list становится опубликованным членом списка.
+		if candidate.ProblemListID != nil {
+			if err := tx.InsertProblemListMember(ctx, *candidate.ProblemListID, taskID, 0); err != nil {
+				return fmt.Errorf("add approved task to problem list: %w", err)
+			}
 		}
 		if err := tx.MarkCandidateApproved(ctx, candidate.ID, taskID, actorID, review.ExpectedRevision+1); err != nil {
 			return fmt.Errorf("mark candidate approved: %w", err)

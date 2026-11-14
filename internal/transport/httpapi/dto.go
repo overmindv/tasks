@@ -95,6 +95,7 @@ type submissionResponse struct {
 	TaskID              string    `json:"task_id"`
 	TaskVersionID       string    `json:"task_version_id"`
 	TaskVersionNumber   int       `json:"task_version_number"`
+	TaskTitle           string    `json:"task_title"`
 	SelectedOptionIDs   []string  `json:"selected_option_ids"`
 	CorrectOptionIDs    []string  `json:"correct_option_ids"`
 	Correct             bool      `json:"correct"`
@@ -241,6 +242,7 @@ func responseSubmission(submission domain.Submission) submissionResponse {
 		TaskID:              submission.TaskID.String(),
 		TaskVersionID:       submission.TaskVersionID.String(),
 		TaskVersionNumber:   submission.TaskVersionNumber,
+		TaskTitle:           submission.TaskTitle,
 		SelectedOptionIDs:   lo.Map(submission.SelectedOptionIDs, func(id uuid.UUID, _ int) string { return id.String() }),
 		CorrectOptionIDs:    lo.Map(submission.CorrectOptionIDs, func(id uuid.UUID, _ int) string { return id.String() }),
 		Correct:             submission.IsCorrect(),

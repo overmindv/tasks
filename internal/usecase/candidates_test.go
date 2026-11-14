@@ -13,9 +13,40 @@ import (
 
 type candidateMemoryRepository struct {
 	repository.Repository
-	candidate domain.TaskCandidate
-	task      domain.Task
-	version   domain.TaskVersion
+	candidate     domain.TaskCandidate
+	task          domain.Task
+	version       domain.TaskVersion
+	created       bool
+	problemListID uuid.UUID
+	memberAdded   bool
+}
+
+// InsertCandidate записывает кандидата как новую запись входной очереди.
+func (r *candidateMemoryRepository) InsertCandidate(_ context.Context, candidate domain.TaskCandidate) (bool, error) {
+	r.candidate = candidate
+	r.created = true
+
+	return true, nil
+}
+
+// GetOrCreateProblemList находит или создаёт список по source_url.
+func (r *candidateMemoryRepository) GetOrCreateProblemList(_ context.Context, input domain.ProblemListImport) (uuid.UUID, error) {
+	if r.problemListID == uuid.Nil {
+		r.problemListID = uuid.New()
+	}
+	_ = input
+
+	return r.problemListID, nil
+}
+
+// InsertProblemListMember фиксирует членство опубликованной задачи в списке.
+func (r *candidateMemoryRepository) InsertProblemListMember(_ context.Context, _ uuid.UUID, taskID uuid.UUID, _ int) error {
+	if r.task.ID != taskID {
+		return fmt.Errorf("member task mismatch")
+	}
+	r.memberAdded = true
+
+	return nil
 }
 
 // WithinTransaction выполняет callback над одной in-memory транзакцией.
@@ -133,5 +164,63 @@ func TestCandidateApproveIsAtomicAndIdempotent(t *testing.T) {
 	}
 	if repeated.Task.ID != approved.Task.ID {
 		t.Fatalf("repeated approve created another task: %s != %s", repeated.Task.ID, approved.Task.ID)
+	}
+}
+
+// TestCandidateImportAssociatesProblemList проверяет привязку кандидатов
+// к problem-list при импорте и членство опубликованной задачи при approve.
+func TestCandidateImportAssociatesProblemList(t *testing.T) {
+	repo := &candidateMemoryRepository{}
+	service := NewCandidateService(repo)
+
+	results := service.ImportBatch(context.Background(), []domain.CandidateImport{
+		{
+			ExternalID: "leetcode:two-sum", SourceID: "leetcode", SourceName: "LeetCode",
+			SourceURL: "https://leetcode.com/problems/two-sum", SourceHash: "hash1",
+			RetrievedAt: time.Now().UTC(), CollectionJobID: uuid.New(), Title: "Two Sum",
+			Statement: "Найдите сумму двух чисел", Difficulty: domain.DifficultyEasy,
+			ProblemList: &domain.ProblemListImport{
+				Name: "oy4y273c", SourceID: "leetcode", SourceURL: "https://leetcode.com/problem-list/oy4y273c",
+			},
+		},
+	})
+	if len(results) != 1 || results[0].Status != "imported" {
+		t.Fatalf("unexpected import results: %#v", results)
+	}
+	if repo.candidate.ProblemListID == nil || *repo.candidate.ProblemListID != repo.problemListID {
+		t.Fatalf("candidate was not linked to problem list: %#v", repo.candidate.ProblemListID)
+	}
+
+	// Одобряем кандидата списка — задача должна попасть в состав списка.
+	actorID := uuid.New()
+	review := domain.CandidateReview{
+		ExpectedRevision: 1, Title: "Two Sum", Statement: "Найдите сумму двух чисел", Difficulty: domain.DifficultyEasy,
+	}
+	if _, err := service.Approve(context.Background(), repo.candidate.ID, actorID, review); err != nil {
+		t.Fatalf("approve list candidate: %v", err)
+	}
+	if !repo.memberAdded {
+		t.Fatal("published task was not added to the problem list")
+	}
+}
+
+// TestCandidateImportSkipsProblemListWithoutRef проверяет импорт без ссылки на список.
+func TestCandidateImportSkipsProblemListWithoutRef(t *testing.T) {
+	repo := &candidateMemoryRepository{}
+	service := NewCandidateService(repo)
+
+	results := service.ImportBatch(context.Background(), []domain.CandidateImport{
+		{
+			ExternalID: "leetcode:two-sum", SourceID: "leetcode", SourceName: "LeetCode",
+			SourceURL: "https://leetcode.com/problems/two-sum", SourceHash: "hash1",
+			RetrievedAt: time.Now().UTC(), CollectionJobID: uuid.New(), Title: "Two Sum",
+			Statement: "Найдите сумму двух чисел", Difficulty: domain.DifficultyEasy,
+		},
+	})
+	if len(results) != 1 || results[0].Status != "imported" {
+		t.Fatalf("unexpected import results: %#v", results)
+	}
+	if repo.candidate.ProblemListID != nil || repo.problemListID != uuid.Nil {
+		t.Fatal("problem list should not be created without a ref")
 	}
 }

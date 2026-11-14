@@ -52,4 +52,8 @@ type Repository interface {
 	UpdateCandidate(ctx context.Context, candidate domain.TaskCandidate, expectedRevision int) error
 	MarkCandidateApproved(ctx context.Context, candidateID, taskID, actorID uuid.UUID, expectedRevision int) error
 	MarkCandidateRejected(ctx context.Context, candidateID, actorID uuid.UUID, expectedRevision int, reason string) error
+	GetOrCreateProblemList(ctx context.Context, input domain.ProblemListImport) (uuid.UUID, error)
+	InsertProblemListMember(ctx context.Context, problemListID, taskID uuid.UUID, position int) error
+	ListProblemLists(ctx context.Context, limit, offset int) ([]domain.ProblemListSummary, error)
+	GetProblemListDetail(ctx context.Context, id uuid.UUID) (domain.ProblemListDetail, error)
 }
