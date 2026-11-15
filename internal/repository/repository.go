@@ -10,6 +10,8 @@ import (
 
 // Repository задаёт операции хранения задач и пользовательских решений.
 type Repository interface {
+	// CodeAdmissionUsage сериализует новые submissions до конца транзакции и считает queued.
+	CodeAdmissionUsage(ctx context.Context, userID uuid.UUID) (own, total int, err error)
 	GetPublishedSuite(ctx context.Context, taskID, versionID uuid.UUID) (*domain.PublishedSuite, error)
 	InsertPublishedSuite(ctx context.Context, suite domain.PublishedSuite) error
 	GetSuiteDraft(ctx context.Context, id uuid.UUID, lock bool) (domain.SuiteDraft, error)

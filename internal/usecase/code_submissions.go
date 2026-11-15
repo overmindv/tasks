@@ -30,9 +30,12 @@ const (
 
 // CodeExecutionPolicy задаёт topic, ограничения и версии языков, которыми владеет tasks.
 type CodeExecutionPolicy struct {
-	RequestsTopic    string
-	TimeLimit        time.Duration
-	MemoryLimitBytes int64
+	MaxPendingPerUser     int
+	MaxPendingTotal       int
+	AdmissionRetrySeconds int
+	RequestsTopic         string
+	TimeLimit             time.Duration
+	MemoryLimitBytes      int64
 
 	// MaxAttempts лимитирует переотправки запуска в sandbox (включая первичную).
 	MaxAttempts int
@@ -75,6 +78,15 @@ type CodeSubmissionService struct {
 
 // NewCodeSubmissionService создаёт сервис асинхронной проверки программных решений.
 func NewCodeSubmissionService(store repository.Repository, policy CodeExecutionPolicy) *CodeSubmissionService {
+	if policy.MaxPendingPerUser <= 0 {
+		policy.MaxPendingPerUser = 3
+	}
+	if policy.MaxPendingTotal <= 0 {
+		policy.MaxPendingTotal = 1000
+	}
+	if policy.AdmissionRetrySeconds <= 0 {
+		policy.AdmissionRetrySeconds = 15
+	}
 	// Сохраняем безопасные defaults для внутренних callers без retry-настроек.
 	if policy.MaxAttempts <= 0 {
 		policy.MaxAttempts = 3
@@ -121,6 +133,21 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 	}
 	var submission domain.CodeSubmission
 	err = s.repository.WithinTransaction(ctx, func(tx repository.Repository) error {
+		own, total, err := tx.CodeAdmissionUsage(ctx, userID)
+		if err != nil {
+			return fmt.Errorf("lock submission admission: %w", err)
+		}
+		existing, err := tx.FindCodeSubmissionByIdempotency(ctx, userID, input.IdempotencyKey)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			submission, err = sameModeSubmission(*existing, hash, legacyCodeRequestHash(taskID, input), input.RunMode)
+			return err
+		}
+		if own >= s.policy.MaxPendingPerUser || total >= s.policy.MaxPendingTotal {
+			return &apperror.Error{Code: apperror.RateLimited, Message: "submission capacity unavailable", Status: http.StatusTooManyRequests, RetryAfterSeconds: s.policy.AdmissionRetrySeconds}
+		}
 		task, err := tx.GetTask(ctx, taskID, true)
 		if err != nil {
 			return fmt.Errorf("get task for code submission: %w", err)

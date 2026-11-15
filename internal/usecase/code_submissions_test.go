@@ -825,3 +825,15 @@ func newCodeSubmissionService() (*codeSubmissionMemoryRepository, *CodeSubmissio
 func (r *codeSubmissionMemoryRepository) GetCodeSubmissionForUpdate(ctx context.Context, id uuid.UUID) (domain.CodeSubmission, error) {
 	return r.GetCodeSubmission(ctx, id)
 }
+
+func (r *codeSubmissionMemoryRepository) CodeAdmissionUsage(_ context.Context, userID uuid.UUID) (own, total int, err error) {
+	for _, s := range r.submissions {
+		if s.Status == domain.CodeSubmissionStatusQueued {
+			total++
+			if s.UserID == userID {
+				own++
+			}
+		}
+	}
+	return
+}

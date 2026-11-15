@@ -32,6 +32,9 @@ const (
 )
 
 type Config struct {
+	AdmissionMaxPerUser     int
+	AdmissionMaxTotal       int
+	AdmissionRetrySeconds   int
 	TaskHunterIngestToken   string
 	KafkaBrokers            []string
 	KafkaRequestsTopic      string
@@ -95,7 +98,20 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	maxUser, err := envInt("CODE_ADMISSION_MAX_PER_USER", 3)
+	if err != nil {
+		return Config{}, err
+	}
+	maxTotal, err := envInt("CODE_ADMISSION_MAX_TOTAL", 1000)
+	if err != nil {
+		return Config{}, err
+	}
+	retrySeconds, err := envInt("CODE_ADMISSION_RETRY_SECONDS", 15)
+	if err != nil {
+		return Config{}, err
+	}
 	cfg := Config{
+		AdmissionMaxPerUser: maxUser, AdmissionMaxTotal: maxTotal, AdmissionRetrySeconds: retrySeconds,
 		TaskHunterIngestToken:   strings.TrimSpace(os.Getenv("TASK_HUNTER_INGEST_TOKEN")),
 		KafkaBrokers:            envList("KAFKA_BOOTSTRAP_SERVERS", defaultKafkaBroker),
 		KafkaRequestsTopic:      env("KAFKA_REQUESTS_TOPIC", defaultRequestTopic),
@@ -124,6 +140,10 @@ func Load() (Config, error) {
 
 // Validate проверяет обязательные и ограниченные бизнес-настройки сервиса.
 func (c Config) Validate() error {
+	if c.AdmissionMaxPerUser < 1 || c.AdmissionMaxPerUser > 100 || c.AdmissionMaxTotal < 1 || c.AdmissionMaxTotal > 100000 || c.AdmissionRetrySeconds < 1 || c.AdmissionRetrySeconds > 3600 {
+		return errors.New("invalid submission admission configuration")
+	}
+
 	if c.TaskHunterIngestToken == "" {
 		return errors.New("TASK_HUNTER_INGEST_TOKEN не задан")
 	}

@@ -119,6 +119,9 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 func writeError(w http.ResponseWriter, err error, logger *slog.Logger) {
 	var public *apperror.Error
 	if errors.As(err, &public) {
+		if public.Status == http.StatusTooManyRequests && public.RetryAfterSeconds > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(public.RetryAfterSeconds))
+		}
 		writeJSON(w, public.Status, public)
 
 		return

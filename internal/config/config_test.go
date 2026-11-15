@@ -9,6 +9,7 @@ import (
 func TestConfigValidate(t *testing.T) {
 	t.Parallel()
 	valid := Config{
+		AdmissionMaxPerUser: 3, AdmissionMaxTotal: 1000, AdmissionRetrySeconds: 15,
 		TaskHunterIngestToken:   "test-token",
 		KafkaBrokers:            []string{"kafka:9092"},
 		KafkaRequestsTopic:      "code-execution.requests.v1",
@@ -48,5 +49,24 @@ func TestEnvListNormalizesBrokers(t *testing.T) {
 	items := envList("TEST_KAFKA_BROKERS", "unused:9092")
 	if len(items) != 2 || items[0] != "kafka-a:9092" || items[1] != "kafka-b:9092" {
 		t.Fatalf("envList() = %#v", items)
+	}
+}
+
+func TestAdmissionConfigBounds(t *testing.T) {
+	t.Setenv("TASK_HUNTER_INGEST_TOKEN", "test")
+	for _, key := range []string{"CODE_ADMISSION_MAX_PER_USER", "CODE_ADMISSION_MAX_TOTAL", "CODE_ADMISSION_RETRY_SECONDS"} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv(key, "0")
+			if _, err := Load(); err == nil {
+				t.Fatal("zero admission policy accepted")
+			}
+		})
+	}
+	t.Setenv("CODE_ADMISSION_MAX_PER_USER", "4")
+	t.Setenv("CODE_ADMISSION_MAX_TOTAL", "200")
+	t.Setenv("CODE_ADMISSION_RETRY_SECONDS", "20")
+	cfg, err := Load()
+	if err != nil || cfg.AdmissionMaxPerUser != 4 || cfg.AdmissionMaxTotal != 200 || cfg.AdmissionRetrySeconds != 20 {
+		t.Fatalf("policy not loaded: %v", err)
 	}
 }

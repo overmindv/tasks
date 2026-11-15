@@ -50,6 +50,7 @@ func Build(app *parker.App) error {
 	taskService := usecase.NewTaskService(store)
 	submissionService := usecase.NewSubmissionService(store)
 	codeSubmissionService := usecase.NewCodeSubmissionService(store, usecase.CodeExecutionPolicy{
+		MaxPendingPerUser: cfg.AdmissionMaxPerUser, MaxPendingTotal: cfg.AdmissionMaxTotal, AdmissionRetrySeconds: cfg.AdmissionRetrySeconds,
 		RequestsTopic:    cfg.KafkaRequestsTopic,
 		TimeLimit:        cfg.CodeExecutionTimeout,
 		MemoryLimitBytes: cfg.CodeExecutionMemory,

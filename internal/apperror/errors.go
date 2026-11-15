@@ -3,6 +3,7 @@ package apperror
 import "fmt"
 
 const (
+	RateLimited               = "RATE_LIMITED"
 	AuthenticationRequired    = "AUTHENTICATION_REQUIRED"
 	PermissionDenied          = "PERMISSION_DENIED"
 	ValidationError           = "VALIDATION_ERROR"
@@ -28,9 +29,10 @@ const (
 
 // Error описывает безопасную публичную ошибку HTTP API.
 type Error struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Status  int    `json:"-"`
+	RetryAfterSeconds int    `json:"retry_after_seconds,omitempty"`
+	Code              string `json:"code"`
+	Message           string `json:"message"`
+	Status            int    `json:"-"`
 }
 
 // Error возвращает строковое представление публичной ошибки.

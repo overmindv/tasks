@@ -308,6 +308,21 @@ paths:
             schema:
               $ref: "#/components/schemas/CodeSubmissionInput"
       responses:
+        "429":
+          description: Квота незавершённых запусков исчерпана (RATE_LIMITED)
+          headers:
+            Retry-After:
+              description: Минимальная рекомендуемая пауза в секундах, не гарантия свободного слота
+              schema: {type: integer, minimum: 1, maximum: 3600}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, message, retry_after_seconds]
+                properties:
+                  code: {type: string, const: RATE_LIMITED}
+                  message: {type: string}
+                  retry_after_seconds: {type: integer, minimum: 1, maximum: 3600}
         "202":
           description: Решение принято в очередь
           content:
