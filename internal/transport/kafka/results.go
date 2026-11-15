@@ -17,9 +17,16 @@ import (
 
 // ResultConsumer читает финальные ответы sandbox и подтверждает offset после PostgreSQL commit.
 type ResultConsumer struct {
-	client  *kgo.Client
-	service *usecase.CodeSubmissionService
+	client  resultClient
+	service resultHandler
 	logger  *slog.Logger
+}
+
+// resultClient ограничивает транспорт операциями последовательного consumer.
+type resultClient interface {
+	PollRecords(context.Context, int) kgo.Fetches
+	CommitRecords(context.Context, ...*kgo.Record) error
+	AllowRebalance()
 }
 
 // resultHandler задаёт контракт приёма одного Kafka result event с точки зрения
@@ -40,54 +47,96 @@ func NewResultConsumer(client *kgo.Client, service *usecase.CodeSubmissionServic
 	}
 }
 
-// Run последовательно обрабатывает records, чтобы commit не обгонял запись результата.
-// Транзиентные ошибки Kafka (rebalance, join группы, недоступность координатора) и БД
-// не должны ронять сервис: после backoff опрос продолжается. Выход — только по отмене
-// context (graceful shutdown). Доставка остаётся at-least-once.
+// Run последовательно обрабатывает records и ограничивает удержание partition.
+// При исчерпании бюджета caller обязан закрыть клиент перед новым запуском:
+// продолжать poll тем же клиентом нельзя, иначе незафиксированный offset потеряется.
 func (c *ResultConsumer) Run(ctx context.Context) error {
-	const (
-		initialRetry = time.Second
-		maxRetry     = 30 * time.Second
-	)
-	retry := initialRetry
+	return c.run(ctx, resultRetryBudget)
+}
+
+func (c *ResultConsumer) run(ctx context.Context, budget time.Duration) error {
+	defer c.client.AllowRebalance()
+	retry := time.Second
 	for {
 		fetches := c.client.PollRecords(ctx, 1)
 		if ctx.Err() != nil {
 			return nil
 		}
-		var err error
-		if errs := fetches.Errors(); len(errs) > 0 {
-			err = fmt.Errorf("poll Kafka results: %w", errs[0].Err)
-			c.client.AllowRebalance()
-		} else {
-			records := fetches.Records()
-			if len(records) == 0 {
-				c.client.AllowRebalance()
-				retry = initialRetry
-				continue
-			}
+		// Fetches могут одновременно содержать записи и ошибки других partition.
+		// Не выбрасываем уже выданную запись из-за такой ошибки.
+		records := fetches.Records()
+		if len(records) > 0 {
 			record := records[0]
-			if processErr := c.process(ctx, record); processErr != nil {
-				err = fmt.Errorf("process Kafka result topic=%s partition=%d offset=%d: %w", record.Topic, record.Partition, record.Offset, processErr)
-				c.client.AllowRebalance()
-			} else if commitErr := c.client.CommitRecords(ctx, record); commitErr != nil {
-				err = fmt.Errorf("commit Kafka result offset: %w", commitErr)
-				c.client.AllowRebalance()
-			} else {
-				c.client.AllowRebalance()
-				retry = initialRetry
-				continue
+			recordCtx, cancel := context.WithTimeout(ctx, budget)
+			err := c.processAndCommit(recordCtx, record)
+			cancel()
+			if ctx.Err() != nil {
+				return nil
 			}
+			if err != nil {
+				return fmt.Errorf("kafka result retry budget exhausted topic=%s partition=%d offset=%d: %w", record.Topic, record.Partition, record.Offset, err)
+			}
+			c.client.AllowRebalance()
+			retry = time.Second
+			continue
 		}
-		c.logger.WarnContext(ctx, "Kafka result consumer: временная ошибка, повтор", "error", err, "retry_after", retry)
-		select {
-		case <-ctx.Done():
+		c.client.AllowRebalance()
+		if errs := fetches.Errors(); len(errs) > 0 {
+			// Не включаем произвольные ошибки транспорта в логи с пользовательскими данными.
+			c.logger.WarnContext(ctx, "Kafka result poll failed", "retry_after", retry)
+			if err := waitResultRetry(ctx, retry); err != nil {
+				return nil
+			}
+			retry = min(retry*2, 5*time.Second)
+		} else {
+			retry = time.Second
+		}
+	}
+}
+
+// processAndCommit удерживает одну запись до commit. Успешную транзакцию БД
+// повторять при ошибке Kafka не нужно; после перезапуска дубли поглощает inbox.
+func (c *ResultConsumer) processAndCommit(ctx context.Context, record *kgo.Record) error {
+	processed := false
+	retry := time.Second
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var err error
+		stage := "process"
+		if !processed {
+			err = c.process(ctx, record)
+			processed = err == nil
+		}
+		if processed {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			stage = "commit"
+			err = c.client.CommitRecords(ctx, record)
+		}
+		if err == nil {
 			return nil
-		case <-time.After(retry):
 		}
-		if retry < maxRetry {
-			retry *= 2
+		c.logger.WarnContext(ctx, "Kafka result retry",
+			"stage", stage, "topic", record.Topic, "partition", record.Partition,
+			"offset", record.Offset, "retry_after", retry)
+		if err := waitResultRetry(ctx, retry); err != nil {
+			return err
 		}
+		retry = min(retry*2, 5*time.Second)
+	}
+}
+
+func waitResultRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 
