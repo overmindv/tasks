@@ -1,0 +1,45 @@
+{
+  "schema_version": "sandbox.run.result.v1",
+  "submission_id": "11111111-1111-4111-8111-111111111111",
+  "attempt_id": "22222222-2222-4222-8222-222222222222",
+  "user_id": "33333333-3333-4333-8333-333333333333",
+  "task_id": "44444444-4444-4444-8444-444444444444",
+  "language": {
+    "id": "python",
+    "version": "3.12"
+  },
+  "status": "passed",
+  "summary": {
+    "tests_total": 1,
+    "tests_passed": 1,
+    "tests_failed": 0
+  },
+  "timing": {
+    "queue_ms": 12,
+    "prepare_ms": 8,
+    "run_ms": 431,
+    "total_ms": 451
+  },
+  "resources": {
+    "cpu_ms": 390,
+    "memory_peak_bytes": 45088768,
+    "exit_code": 0,
+    "signal": null
+  },
+  "logs": {
+    "stdout": ".\\n1 passed in 0.02s\\n",
+    "stderr": "",
+    "truncated": false
+  },
+  "tests": [
+    {
+      "name": "test_solution.py::test_add",
+      "status": "passed",
+      "duration_ms": 2
+    }
+  ],
+  "error": null,
+  "trace_id": "trace-111",
+  "worker_id": "sandbox-worker-1",
+  "created_at": "2026-08-12T19:00:01Z"
+}

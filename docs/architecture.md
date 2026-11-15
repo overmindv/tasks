@@ -44,7 +44,7 @@ Transport DTO не используются как доменные или Postg
 1. Пользователь загружает ровно один UTF-8 файл `.py` или `.go` размером до 256 KiB и передаёт UUID idempotency key.
 2. Use case проверяет опубликованную programming-версию и формирует тесты только из открытых `examples`, у которых задан ожидаемый output.
 3. `code_submissions` и `code_submission_outbox` записываются одной PostgreSQL-транзакцией. HTTP сразу возвращает `202` и статус `queued`.
-4. Dispatcher публикует request в Kafka topic `code-execution.requests.v1` с ключом `execution_id`. После broker acknowledgement payload outbox-сообщения очищается; исходный код решения в `code_submissions` намеренно сохраняется (возвращается в API детали запуска своей страницы).
+4. Dispatcher публикует request в Kafka topic `code-execution.requests.v1` с ключом `submission_id`. После broker acknowledgement payload outbox-сообщения очищается; исходный код решения в `code_submissions` намеренно сохраняется (возвращается в API детали запуска своей страницы).
 5. `sandbox` независимо читает request topic, безопасно запускает код и публикует результат в `code-execution.results.v1`. Реализация sandbox не входит в `tasks`.
 6. Consumer строго проверяет JSON и совпадение `submission_id`, `execution_id` и `task_id` с сохранённым запуском. Inbox record и финальный результат сохраняются одной транзакцией, затем Kafka offset подтверждается.
 7. Вердикт вычисляется самим `tasks` из вывода кейсов (sandbox возвращает только вывод и метаданные). Финальные verdict'ы — в allowlist `domain.IsFinalExecutionVerdict`; `infrastructure_error`/`checker_error` никогда не помечают решение как неверное. Инфраструктурные ошибки переотправляются до лимита `MaxAttempts`, затем завершаются как `infrastructure_error`; заброшенные `queued`-запуски переотправляет reaper. Клиент опрашивает `GET /v1/code-submissions/{id}`: статусы `queued` и `completed`.
@@ -72,3 +72,5 @@ rebalance timeout 60 секунд. При исчерпании бюджета co
 Сервис не должен публиковаться напрямую наружу. Роли принимаются только от внутреннего `api-gateway`; admin-операции разрешены `admin` и `superuser`. До submit public API никогда не возвращает `is_correct`.
 
 Request logs не содержат body, исходный код, выбранные ответы или правильные варианты. HTTP API результата не возвращает исходный код. Kafka logs содержат только event/submission ID и topic metadata. Внутренние SQL-ошибки преобразуются в общий `INTERNAL_ERROR`.
+
+Точный wire-контракт и ограничения текущего retry: [execution-contract](execution-contract.md).

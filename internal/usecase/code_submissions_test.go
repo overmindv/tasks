@@ -168,6 +168,9 @@ func TestCodeSubmissionServiceUsesTransactionalOutboxAndIdempotency(t *testing.T
 	if created.Status != domain.CodeSubmissionStatusQueued || created.SourceFileName != "main.py" || len(repo.outbox) != 1 {
 		t.Fatalf("created = %#v, outbox = %d", created, len(repo.outbox))
 	}
+	if repo.outbox[0].MessageKey != created.ID.String() {
+		t.Errorf("message key = %q, want submission_id %s", repo.outbox[0].MessageKey, created.ID)
+	}
 	var request execution.RunRequest
 	if err := json.Unmarshal(repo.outbox[0].Payload, &request); err != nil {
 		t.Fatalf("decode outbox request: %v", err)
@@ -178,6 +181,9 @@ func TestCodeSubmissionServiceUsesTransactionalOutboxAndIdempotency(t *testing.T
 		request.Code.Files == nil || len(request.Code.Files) != 1 || request.Code.Files[0].ContentB64 == "" ||
 		request.Limits.CPUms != 1000 || request.Limits.Wallms < request.Limits.CPUms {
 		t.Fatalf("request = %#v", request)
+	}
+	if request.Metadata["task_version_id"] != versionID.String() {
+		t.Errorf("task_version_id = %v, want %s", request.Metadata["task_version_id"], versionID)
 	}
 	repeated, err := service.Submit(context.Background(), taskID, userID, input)
 	if err != nil || repeated.ID != created.ID || len(repo.outbox) != 1 {
@@ -381,6 +387,14 @@ func TestCodeSubmissionServiceRetriesInfraErrorThenExhausts(t *testing.T) {
 		metadata := ExecutionMessageMetadata{Topic: "results", Partition: 0, Offset: int64(i), PayloadSHA256: strings.Repeat("a", 64)}
 		if err := service.HandleRunResult(context.Background(), metadata, infraResult); err != nil {
 			t.Fatalf("HandleRunResult(%d) error = %v", i, err)
+		}
+		message := repo.outbox[len(repo.outbox)-1]
+		var retried execution.RunRequest
+		if err := json.Unmarshal(message.Payload, &retried); err != nil {
+			t.Fatal(err)
+		}
+		if message.MessageKey != created.ID.String() || retried.Metadata["task_version_id"] != versionID.String() {
+			t.Errorf("retry identity: key=%s metadata=%v", message.MessageKey, retried.Metadata)
 		}
 		state := repo.submissions[created.ID]
 		if state.Status != domain.CodeSubmissionStatusQueued || state.Attempts != i || len(repo.outbox) != i {

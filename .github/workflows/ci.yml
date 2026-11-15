@@ -25,6 +25,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate execution wire schemas
+        run: |
+          python -m pip install -r scripts/requirements-contract.txt
+          python scripts/check_execution_contract.py
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

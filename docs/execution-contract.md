@@ -1,0 +1,89 @@
+# Контракт tasks ↔ sandbox (OVM-241)
+
+## Wire v1 и владельцы
+
+| Producer | Topic | Consumer | Schema |
+| --- | --- | --- | --- |
+| tasks outbox | code-execution.requests.v1 | sandbox | sandbox.run.request.v1 |
+| sandbox | code-execution.retry.v1 | sandbox | тот же request + retry headers |
+| sandbox | code-execution.results.v1 | tasks inbox | sandbox.run.result.v1 |
+
+Канонические JSON Schema — sandbox/api/schemas. Tasks/api/events содержит точные
+snapshots и проверяет отсутствие дрейфа. Старые code_execution.requested/completed
+не используются в этих topics. Execution results не являются публичными activity
+или авторитетными учебными outcome events: последние определяются отдельно
+в DOC-03/OVM-126 и OVM-249. Эти задачи не закрыты данным изменением.
+
+## Идентичность и версия
+
+- Kafka key новых запросов, sandbox retries/results — строка submission_id.
+- submission_id — неизменяемое решение пользователя; attempt_id — конкретное исполнение.
+- task_id указывает задачу; metadata.task_version_id в запросе tasks указывает
+  неизменяемую версию из code_submissions.task_version_id.
+- task_version_id не добавляется top-level в v1: строгие старые consumers отвергнут
+  неизвестное поле. Existing metadata поддерживает scalar значения.
+- Ответ связан с версией через сохранённые submission/attempt; metadata не эхоится
+  sandbox в result. Изолированное сообщение результата не содержит всей версии.
+- trace_id — существующий correlation ID; отдельный event_id в v1 не вводится.
+
+## Режимы и профиль tasks
+
+Execution: execution.mode=execution, inputs — stdin-кейсы. Sandbox возвращает
+status=ok и cases; tasks сравнивает stdout с expected в своей БД.
+Pytest/go-test: tests.mode, inline files или object_storage reference; sandbox
+возвращает passed/failed/compile_error и tests/summary. Schemas и общие fixtures
+охватывают все три режима, но tasks пока создаёт и оценивает только execution.
+Приём test-mode envelope декодером tasks не означает поддержку grading test-mode.
+
+Sandbox допускает 32 stdin-кейса и до 1 MiB вывода. Профиль текущего tasks уже:
+не более 20 кейсов, 64 KiB stdout/stderr на кейс, error.message до 2000 байт.
+Схема описывает sandbox envelope; use-case policy/validators tasks добавляют
+собственные ограничения. JSON Schema maxLength считает Unicode code points,
+а runtime-лимиты размера stdin/output — UTF-8 байты; для многобайтных строк
+схема не заменяет runtime validation. Валидация полной матрицы результатов — OVM-246.
+Нельзя расширять output limits tasks только потому, что это допускает sandbox.
+
+## Владельцы retry
+
+Нормативная политика:
+
+1. Outbox tasks повторяет доставку того же payload/attempt_id до broker ack.
+2. Sandbox самостоятельно повторяет инфраструктурный сбой внутри attempt_id:
+   тот же payload, bounded retry headers/backoff, дедупликация в storage.
+3. После terminal infrastructure result новый запуск инициирует только tasks:
+   новый уникальный attempt_id, прежние submission_id и task_version_id.
+4. Повтор результата доставляется at-least-once; tasks inbox идемпотентен.
+   Повтор Kafka commit результата (OVM-255) не создаёт новое исполнение.
+5. Поздний результат предыдущей попытки не должен завершать текущую попытку.
+   Reaper не должен конкурировать с ещё действующим бюджетом sandbox retry.
+
+**Открытый runtime gap OVM-245:** tasks requeue сейчас увеличивает attempts,
+но повторно использует execution_id/attempt_id. Поэтому sandbox может вернуть
+закешированный terminal result вместо нового исполнения. Fencing, новый UUID
+и согласование окна reaper с sandbox retry реализуются отдельно. Данная задача
+фиксирует один целевой контракт, а не объявляет эту политику уже внедрённой.
+
+Sandbox при исчерпании retry публикует известный terminal result или
+internal_error и DLQ; attempt_in_progress — исключение: активное исполнение не
+завершается фиктивным результатом. DLQ не является учебным вердиктом.
+
+## Совместимость и интеграция
+
+Изменение schemas отражает уже существующий runtime execution-mode; номер v1
+сохраняется. Metadata добавляется совместимо. Новые обязательные поля, изменение
+смысла status/ID либо неизвестные строгому decoder поля требуют согласованного
+v2 topic и миграции producer/consumer. Даже optional top-level поле нельзя считать
+совместимым без проверки строгих Go decoder.
+
+Обновить schemas/tests sandbox и snapshots/tests tasks, затем producer tasks.
+Старые outbox записи не переписываются: они сохраняют ключ execution_id и могут
+оказаться в другой partition. Нельзя полагаться на порядок между старым и новым
+ключом; inbox и OVM-245 остаются обязательными. Push/deployment не выполняется.
+
+## Проверки
+
+В обоих репозиториях: `go test ./internal/...`, JSON Schema через
+`scripts/check_execution_contract.py`; `--peer ../sandbox` (для tasks) или
+`--peer ../tasks` (для sandbox) проверяет равенство schemas и fixtures.
+CI каждого репозитория проверяет его snapshot независимо от sibling checkout.
+Тесты не исполняют пользовательский код и не требуют Kafka/gojudge.

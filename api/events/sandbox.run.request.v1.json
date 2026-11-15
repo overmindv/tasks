@@ -1,0 +1,447 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://overmindv.local/schemas/sandbox.run.request.v1.json",
+  "title": "Sandbox Run Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "submission_id",
+    "attempt_id",
+    "user_id",
+    "task_id",
+    "language",
+    "code",
+    "limits",
+    "trace_id",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "sandbox.run.request.v1"
+    },
+    "submission_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "attempt_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "task_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "language": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+          "examples": [
+            "python"
+          ]
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "examples": [
+            "3.12"
+          ]
+        }
+      }
+    },
+    "code": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "files"
+      ],
+      "properties": {
+        "entrypoint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._/-]+$",
+          "examples": [
+            "solution.py"
+          ]
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/source_file"
+          }
+        }
+      }
+    },
+    "tests": {
+      "anyOf": [
+        {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/inline_tests"
+            },
+            {
+              "$ref": "#/$defs/referenced_tests"
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "const": ""
+            },
+            "source": {
+              "const": ""
+            }
+          }
+        }
+      ]
+    },
+    "limits": {
+      "$ref": "#/$defs/limits"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ]
+      },
+      "maxProperties": 32
+    },
+    "trace_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "inputs"
+      ],
+      "properties": {
+        "mode": {
+          "const": "execution"
+        },
+        "inputs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "maxLength": 1048576
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "source_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "content_b64"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._/-]+$",
+          "not": {
+            "anyOf": [
+              {
+                "pattern": "^/"
+              },
+              {
+                "pattern": "^[A-Za-z]:"
+              },
+              {
+                "pattern": "(^|/)\\.\\.(/|$)"
+              }
+            ]
+          },
+          "examples": [
+            "solution.py"
+          ]
+        },
+        "content_b64": {
+          "type": "string",
+          "contentEncoding": "base64",
+          "maxLength": 1048576
+        },
+        "checksum_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "inline_tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "source",
+        "files"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "pytest",
+            "go-test"
+          ]
+        },
+        "source": {
+          "const": "inline"
+        },
+        "entrypoint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._/-]+$",
+          "examples": [
+            "test_solution.py"
+          ]
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/source_file"
+          }
+        }
+      }
+    },
+    "referenced_tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "source",
+        "suite_id",
+        "checksum_sha256"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "pytest",
+            "go-test"
+          ]
+        },
+        "source": {
+          "const": "object_storage"
+        },
+        "suite_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "checksum_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpu_ms",
+        "wall_ms",
+        "memory_mb",
+        "pids",
+        "stdout_bytes",
+        "stderr_bytes",
+        "workspace_bytes"
+      ],
+      "properties": {
+        "cpu_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 30000
+        },
+        "wall_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 60000
+        },
+        "memory_mb": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 1024
+        },
+        "pids": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "stdout_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "stderr_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "workspace_bytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 10485760
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "sandbox.run.request.v1",
+      "submission_id": "11111111-1111-4111-8111-111111111111",
+      "attempt_id": "22222222-2222-4222-8222-222222222222",
+      "user_id": "33333333-3333-4333-8333-333333333333",
+      "task_id": "44444444-4444-4444-8444-444444444444",
+      "language": {
+        "id": "python",
+        "version": "3.12"
+      },
+      "code": {
+        "entrypoint": "solution.py",
+        "files": [
+          {
+            "path": "solution.py",
+            "content_b64": "ZGVmIGFkZChhLCBiKTogcmV0dXJuIGEgKyBiCg=="
+          }
+        ]
+      },
+      "tests": {
+        "mode": "pytest",
+        "source": "inline",
+        "entrypoint": "test_solution.py",
+        "files": [
+          {
+            "path": "test_solution.py",
+            "content_b64": "ZnJvbSBzb2x1dGlvbiBpbXBvcnQgYWRkCgpkZWYgdGVzdF9hZGQoKToKICAgIGFzc2VydCBhZGQoMSwgMikgPT0gMwo="
+          }
+        ]
+      },
+      "limits": {
+        "cpu_ms": 2000,
+        "wall_ms": 5000,
+        "memory_mb": 128,
+        "pids": 32,
+        "stdout_bytes": 32768,
+        "stderr_bytes": 32768,
+        "workspace_bytes": 1048576
+      },
+      "trace_id": "trace-111",
+      "created_at": "2026-08-12T19:00:00Z"
+    },
+    {
+      "schema_version": "sandbox.run.request.v1",
+      "submission_id": "11111111-1111-4111-8111-111111111111",
+      "attempt_id": "22222222-2222-4222-8222-222222222222",
+      "user_id": "33333333-3333-4333-8333-333333333333",
+      "task_id": "44444444-4444-4444-8444-444444444444",
+      "language": {
+        "id": "python",
+        "version": "3.12"
+      },
+      "code": {
+        "entrypoint": "solution.py",
+        "files": [
+          {
+            "path": "solution.py",
+            "content_b64": "ZGVmIGFkZChhLCBiKTogcmV0dXJuIGEgKyBiCg=="
+          }
+        ]
+      },
+      "limits": {
+        "cpu_ms": 2000,
+        "wall_ms": 5000,
+        "memory_mb": 128,
+        "pids": 32,
+        "stdout_bytes": 32768,
+        "stderr_bytes": 32768,
+        "workspace_bytes": 1048576
+      },
+      "trace_id": "trace-111",
+      "created_at": "2026-08-12T19:00:00Z",
+      "metadata": {
+        "task_version_id": "55555555-5555-4555-8555-555555555555"
+      },
+      "execution": {
+        "mode": "execution",
+        "inputs": [
+          "hello\n"
+        ]
+      }
+    }
+  ],
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "execution"
+        ]
+      },
+      "then": {
+        "required": [
+          "execution"
+        ]
+      },
+      "else": {
+        "required": [
+          "tests"
+        ],
+        "properties": {
+          "tests": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/inline_tests"
+              },
+              {
+                "$ref": "#/$defs/referenced_tests"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
