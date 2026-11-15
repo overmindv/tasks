@@ -51,6 +51,7 @@ type CodeExecutionPolicy struct {
 
 // CodeSubmissionInput описывает один загруженный пользователем файл решения.
 type CodeSubmissionInput struct {
+	RunMode        domain.RunMode
 	TaskVersionID  uuid.UUID
 	IdempotencyKey uuid.UUID
 	Language       domain.ProgrammingLanguage
@@ -89,6 +90,12 @@ func NewCodeSubmissionService(store repository.Repository, policy CodeExecutionP
 
 // Submit валидирует файл и атомарно сохраняет решение вместе с Kafka outbox event.
 func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.UUID, input CodeSubmissionInput) (domain.CodeSubmission, error) {
+	if input.RunMode == "" {
+		input.RunMode = domain.RunModeSamples
+	}
+	if input.RunMode != domain.RunModeSamples && input.RunMode != domain.RunModeGraded {
+		return domain.CodeSubmission{}, apperror.New(apperror.ValidationError, "invalid run_mode", 400)
+	}
 	if input.SourceFileName == "" {
 		// Вариант «код в консоли»: имя файла выводится детерминированно из языка.
 		name, nameErr := domain.DefaultSourceFileName(input.Language)
@@ -110,7 +117,7 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 		return domain.CodeSubmission{}, fmt.Errorf("find code submission by idempotency key: %w", err)
 	}
 	if existing != nil {
-		return sameIdempotentCodeSubmission(*existing, hash)
+		return sameModeSubmission(*existing, hash, legacyCodeRequestHash(taskID, input), input.RunMode)
 	}
 	var submission domain.CodeSubmission
 	err = s.repository.WithinTransaction(ctx, func(tx repository.Repository) error {
@@ -129,11 +136,16 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 			return apperror.New(apperror.TaskTypeNotSubmittable, "загрузка файла доступна только для programming-задач", http.StatusConflict)
 		}
 		open := openExamples(version.Examples)
-		if len(open) == 0 {
+		if input.RunMode == domain.RunModeSamples && len(open) == 0 {
 			return apperror.New(apperror.TaskNotExecutable, "у задачи нет открытых примеров с ожидаемым результатом", http.StatusConflict)
+		}
+		suite, err := executionSuite(ctx, tx, taskID, version.ID, input.RunMode, input.Language)
+		if err != nil {
+			return err
 		}
 		now := time.Now().UTC()
 		submission = domain.CodeSubmission{
+			RunMode:           input.RunMode,
 			ID:                uuid.New(),
 			UserID:            userID,
 			TaskID:            taskID,
@@ -154,6 +166,7 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 			UpdatedAt:         now,
 		}
 		request := s.buildRunRequest(submission, open, now)
+		applyExecutionSuite(&request, suite)
 		payload, err := execution.EncodeRunRequest(request)
 		if err != nil {
 			return fmt.Errorf("encode execution request: %w", err)
@@ -178,7 +191,7 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 	if err != nil {
 		existing, findErr := s.repository.FindCodeSubmissionByIdempotency(ctx, userID, input.IdempotencyKey)
 		if findErr == nil && existing != nil {
-			return sameIdempotentCodeSubmission(*existing, hash)
+			return sameModeSubmission(*existing, hash, legacyCodeRequestHash(taskID, input), input.RunMode)
 		}
 
 		return domain.CodeSubmission{}, fmt.Errorf("submit code solution: %w", err)
@@ -214,7 +227,7 @@ func (s *CodeSubmissionService) buildRunRequest(submission domain.CodeSubmission
 			Inputs: exampleInputs(open),
 		},
 		Limits:    s.executionLimits(submission.Language),
-		Metadata:  map[string]any{"task_version_id": submission.TaskVersionID.String(), "result_context_version": "1"},
+		Metadata:  map[string]any{"task_version_id": submission.TaskVersionID.String(), "result_context_version": "1", "run_mode": string(submission.RunMode)},
 		TraceID:   submission.CorrelationID.String(),
 		CreatedAt: now,
 	}
@@ -300,11 +313,21 @@ func (s *CodeSubmissionService) HandleRunResult(ctx context.Context, metadata Ex
 			return fmt.Errorf("get result task version: %w", err)
 		}
 		expectedCases := openExamples(version.Examples)
+		suite, err := executionSuite(ctx, tx, current.TaskID, current.TaskVersionID, current.RunMode, current.Language)
+		if err != nil {
+			return err
+		}
+		if suite != nil {
+			expectedCases = suiteExamples(suite)
+		}
 		if result.EvaluationContext == nil || result.EvaluationContext.TaskVersionID != current.TaskVersionID.String() ||
 			result.EvaluationContext.SuiteSHA256 != execution.InputSuiteSHA256(exampleInputs(expectedCases)) {
 			return s.retryOrFail(ctx, tx, current, now)
 		}
 		verdict, tests, failure := verdictFromRunResult(result, expectedCases)
+		if suite != nil {
+			verdict, tests, failure = verdictFromSuiteResult(result, suite)
+		}
 		// Инфраструктурная ошибка песочницы — не приговор для пользователя: пока не
 		// исчерпаны попытки, переотправляем запуск через outbox вместо завершения.
 		if codeSubmissionRetryable(verdict, result) {
@@ -381,7 +404,11 @@ func codeSubmissionRetryable(verdict domain.ExecutionVerdict, result execution.R
 // Возвращает permanent mismatch, если запуск завершён конкурирующим обработчиком.
 func (s *CodeSubmissionService) requeue(ctx context.Context, tx repository.Repository, current domain.CodeSubmission, version domain.TaskVersion, at time.Time) error {
 	open := openExamples(version.Examples)
-	if len(open) == 0 {
+	suite, err := executionSuite(ctx, tx, current.TaskID, current.TaskVersionID, current.RunMode, current.Language)
+	if err != nil {
+		return err
+	}
+	if suite == nil && len(open) == 0 {
 		return apperror.New(apperror.ExecutionResultMismatch, "версия задачи не содержит открытых примеров для переотправки", http.StatusConflict)
 	}
 	nextExecutionID := uuid.New()
@@ -394,6 +421,7 @@ func (s *CodeSubmissionService) requeue(ctx context.Context, tx repository.Repos
 	}
 	current.ExecutionID = nextExecutionID
 	request := s.buildRunRequest(current, open, at)
+	applyExecutionSuite(&request, suite)
 	payload, err := execution.EncodeRunRequest(request)
 	if err != nil {
 		return fmt.Errorf("encode retry execution request: %w", err)
@@ -531,7 +559,7 @@ func executionPhaseFromResult(result execution.RunResult) *domain.ExecutionPhase
 
 // verdictFromRunResult сравнивает вывод каждого кейса с ожидаемым и выводит итоговый вердикт.
 // Вердикт вычисляется в tasks: sandbox возвращает только вывод и мета-данные.
-func verdictFromRunResult(result execution.RunResult, expected []domain.TaskExample) (domain.ExecutionVerdict, []domain.ExecutionTestResult, *domain.ExecutionFailure) {
+func verdictFromRunResult(result execution.RunResult, expected []domain.TaskExample, checker ...string) (domain.ExecutionVerdict, []domain.ExecutionTestResult, *domain.ExecutionFailure) {
 	if !validResultCases(result, len(expected)) {
 		return domain.ExecutionVerdictInfrastructureError, nil, &domain.ExecutionFailure{Code: "INVALID_EXECUTION_RESULT", Message: "invalid execution result"}
 	}
@@ -550,7 +578,7 @@ func verdictFromRunResult(result execution.RunResult, expected []domain.TaskExam
 		}
 	}
 	for _, run := range result.Cases {
-		verdict := caseVerdict(run, expectedAt(expected, run.Index))
+		verdict := caseVerdict(run, expectedAt(expected, run.Index), checker...)
 		if verdictPriority(verdict) > verdictPriority(best) {
 			best = verdict
 		}
@@ -600,7 +628,7 @@ func runLevelVerdict(result execution.RunResult) (domain.ExecutionVerdict, []dom
 
 // caseVerdict выводит вердикт одного кейса: лимиты/рантайм из статуса песочницы,
 // иначе — сравнение stdout с ожидаемым выводом открытого примера.
-func caseVerdict(run execution.CaseRunResult, expectedOutput string) domain.ExecutionVerdict {
+func caseVerdict(run execution.CaseRunResult, expectedOutput string, checker ...string) domain.ExecutionVerdict {
 	switch run.Status {
 	case execution.ResultStatusTimeLimit:
 		return domain.ExecutionVerdictTimeLimitExceeded
@@ -627,7 +655,12 @@ func caseVerdict(run execution.CaseRunResult, expectedOutput string) domain.Exec
 	if run.ExitCode != nil && *run.ExitCode != 0 {
 		return domain.ExecutionVerdictRuntimeError
 	}
-	if strings.TrimRight(run.Stdout, "\r\n") == strings.TrimRight(expectedOutput, "\r\n") {
+	actual := run.Stdout
+	if len(checker) == 0 || checker[0] != "exact" {
+		actual = strings.TrimRight(actual, "\r\n")
+		expectedOutput = strings.TrimRight(expectedOutput, "\r\n")
+	}
+	if actual == expectedOutput {
 		return domain.ExecutionVerdictAccepted
 	}
 
@@ -668,6 +701,14 @@ func verdictPriority(verdict domain.ExecutionVerdict) int {
 
 // codeRequestHash строит fingerprint всех полей, влияющих на запуск.
 func codeRequestHash(taskID uuid.UUID, input CodeSubmissionInput) string {
+	mode := input.RunMode
+	if mode == "" {
+		mode = domain.RunModeSamples
+	}
+	sum := sha256.Sum256([]byte(string(mode) + "\x00" + legacyCodeRequestHash(taskID, input)))
+	return hex.EncodeToString(sum[:])
+}
+func legacyCodeRequestHash(taskID uuid.UUID, input CodeSubmissionInput) string {
 	value := strings.Join([]string{
 		taskID.String(),
 		input.TaskVersionID.String(),
@@ -774,4 +815,60 @@ func validResultCases(result execution.RunResult, expected int) bool {
 		}
 	}
 	return result.Summary.CasesWithError == errors
+}
+
+// Legacy fingerprint допускается только для пробных запусков до миграции.
+func sameModeSubmission(s domain.CodeSubmission, hash, legacy string, mode domain.RunMode) (domain.CodeSubmission, error) {
+	if mode == domain.RunModeSamples && (s.RunMode == "" || s.RunMode == domain.RunModeSamples) && s.RequestHash == legacy {
+		return s, nil
+	}
+	return sameIdempotentCodeSubmission(s, hash)
+}
+func executionSuite(ctx context.Context, repo repository.Repository, taskID, versionID uuid.UUID, mode domain.RunMode, language domain.ProgrammingLanguage) (*domain.PublishedSuite, error) {
+	if mode != domain.RunModeGraded {
+		return nil, nil
+	}
+	suite, err := repo.GetPublishedSuite(ctx, taskID, versionID)
+	if err != nil {
+		return nil, err
+	}
+	if suite == nil {
+		return nil, apperror.New("GRADED_SUITE_REQUIRED", "published suite required", 409)
+	}
+	if suite.Definition.Language != language {
+		return nil, apperror.New(apperror.ValidationError, "language not supported by suite", 400)
+	}
+	return suite, nil
+}
+func applyExecutionSuite(req *execution.RunRequest, suite *domain.PublishedSuite) {
+	if suite == nil {
+		return
+	}
+	ref := suite.Reference
+	req.Execution.Inputs = nil
+	req.Execution.Suite = &ref
+	req.Language.Version = suite.Definition.LanguageVersion
+	l := suite.Definition.Limits
+	req.Limits = execution.Limits{CPUms: l.CPUms, Wallms: l.Wallms, MemoryMB: l.MemoryMB, PIDs: l.PIDs, StdoutBytes: l.StdoutBytes, StderrBytes: l.StderrBytes, WorkspaceBytes: l.WorkspaceBytes}
+}
+func suiteExamples(suite *domain.PublishedSuite) []domain.TaskExample {
+	cases := make([]domain.TaskExample, len(suite.Definition.Cases))
+	for i, c := range suite.Definition.Cases {
+		cases[i] = domain.TaskExample{Input: c.Input, Output: c.Output}
+	}
+	return cases
+}
+func verdictFromSuiteResult(result execution.RunResult, suite *domain.PublishedSuite) (domain.ExecutionVerdict, []domain.ExecutionTestResult, *domain.ExecutionFailure) {
+	expected := suiteExamples(suite)
+	verdict, tests, failure := verdictFromRunResult(result, expected, suite.Definition.Checker)
+	for i := range tests {
+		c := suite.Definition.Cases[result.Cases[i].Index]
+		tests[i].TestID = c.ID
+		tests[i].SampleVisible = !c.Hidden
+		if c.Hidden {
+			tests[i].Stdout = ""
+			tests[i].Stderr = ""
+		}
+	}
+	return verdict, tests, failure
 }

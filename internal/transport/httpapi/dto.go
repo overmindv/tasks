@@ -107,6 +107,7 @@ type submissionResponse struct {
 }
 
 type codeSubmissionResponse struct {
+	RunMode           domain.RunMode               `json:"run_mode"`
 	ID                string                       `json:"id"`
 	UserID            string                       `json:"user_id"`
 	TaskID            string                       `json:"task_id"`
@@ -267,12 +268,16 @@ func responseSubmission(submission domain.Submission) submissionResponse {
 // responseCodeSubmission преобразует запуск в DTO без исходного кода пользователя.
 func responseCodeSubmission(submission domain.CodeSubmission) codeSubmissionResponse {
 	submission = domain.PublicCodeSubmission(submission)
+	if submission.RunMode == "" {
+		submission.RunMode = domain.RunModeSamples
+	}
 	tests := make([]executionTestResponse, 0, len(submission.Tests))
 	for _, test := range submission.Tests {
 		tests = append(tests, executionTestResponse{TestID: test.TestID, Verdict: test.Verdict, Stdout: test.Stdout, Stderr: test.Stderr, DurationMS: test.DurationMS, MemoryBytes: test.MemoryBytes})
 	}
 
 	return codeSubmissionResponse{
+		RunMode:           submission.RunMode,
 		ID:                submission.ID.String(),
 		UserID:            submission.UserID.String(),
 		TaskID:            submission.TaskID.String(),

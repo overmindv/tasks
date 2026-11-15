@@ -68,8 +68,8 @@ func TestPracticeProgressPostgres(t *testing.T) {
 	}
 	code := func(user, task, version uuid.UUID, verdict string, at time.Time) {
 		t.Helper()
-		_, err := pool.Exec(ctx, `INSERT INTO code_submissions (id,user_id,task_id,task_version_id,execution_id,correlation_id,idempotency_key,request_hash,language,source_file_name,source_code,status,verdict,completed_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,'hash','go','main.go','PRIVATE_SOURCE_CANARY','completed',$8,$9)`, uuid.New(), user, task, version, uuid.New(), uuid.New(), uuid.New(), verdict, at)
+		_, err := pool.Exec(ctx, `INSERT INTO code_submissions (id,user_id,task_id,task_version_id,execution_id,correlation_id,idempotency_key,request_hash,language,source_file_name,source_code,status,verdict,completed_at,run_mode)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,'hash','go','main.go','PRIVATE_SOURCE_CANARY','completed',$8,$9,'graded')`, uuid.New(), user, task, version, uuid.New(), uuid.New(), uuid.New(), verdict, at)
 		if err != nil {
 			t.Fatal(err)
 		}

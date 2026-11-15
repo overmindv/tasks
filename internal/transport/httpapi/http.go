@@ -59,7 +59,11 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) (actor, bool) {
 
 // decodeJSON строго декодирует один JSON-объект с ограничением размера.
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+	return decodeJSONLimit(w, r, target, maxRequestBody)
+}
+
+func decodeJSONLimit(w http.ResponseWriter, r *http.Request, target any, limit int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {

@@ -63,7 +63,7 @@ func ValidateSuite(s SuiteDefinition, requireHidden bool) error {
 		return errors.New("unsupported suite checker")
 	}
 	l := s.Limits
-	if l.CPUms < 100 || l.CPUms > 30000 || l.Wallms < l.CPUms || l.Wallms > 60000 || l.MemoryMB < 16 || l.MemoryMB > 1024 || l.PIDs < 1 || l.PIDs > 128 || l.StdoutBytes < 1 || l.StdoutBytes > 65536 || l.StderrBytes < 1 || l.StderrBytes > 65536 || l.WorkspaceBytes < 1048576 || l.WorkspaceBytes > 67108864 {
+	if l.CPUms < 100 || l.CPUms > 30000 || l.Wallms < l.CPUms || l.Wallms > 60000 || l.MemoryMB < 16 || l.MemoryMB > 1024 || l.PIDs < 1 || l.PIDs > 128 || l.StdoutBytes < 1 || l.StdoutBytes > 65536 || l.StderrBytes < 1 || l.StderrBytes > 65536 || l.WorkspaceBytes < 1048576 || l.WorkspaceBytes > 10485760 {
 		return errors.New("invalid suite limits")
 	}
 	if len(s.Cases) < 1 || len(s.Cases) > 20 {

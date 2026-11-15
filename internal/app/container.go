@@ -86,7 +86,7 @@ func Build(app *parker.App) error {
 			return err
 		}
 	}
-	httpapi.RegisterSuites(app.HTTP(), usecase.NewSuiteService(store, suiteObjects), app.Logger())
+	httpapi.RegisterSuites(app.HTTP(), usecase.NewSuiteService(store, suiteObjects, map[domain.ProgrammingLanguage]string{domain.ProgrammingLanguagePython: cfg.PythonVersion, domain.ProgrammingLanguageGo: cfg.GoVersion}), app.Logger())
 
 	dispatcher := kafkaadapter.NewOutboxDispatcher(store, producer, cfg.OutboxPollInterval, app.Logger())
 	consumer := kafkaadapter.NewResultConsumer(consumerClient, codeSubmissionService, app.Logger())

@@ -148,3 +148,35 @@ func TestParseCodeSubmissionRejectsUnknownField(t *testing.T) {
 		t.Fatal("parseCodeSubmission() должен отклонить unknown field")
 	}
 }
+
+func TestParseRunModes(t *testing.T) {
+	for _, mode := range []string{"", "samples", "graded", "unknown"} {
+		t.Run(mode, func(t *testing.T) {
+			var body bytes.Buffer
+			writer := multipart.NewWriter(&body)
+			for k, v := range map[string]string{"task_version_id": uuid.NewString(), "idempotency_key": uuid.NewString(), "language": "python", "source_code": "print(1)"} {
+				_ = writer.WriteField(k, v)
+			}
+			if mode != "" {
+				_ = writer.WriteField("run_mode", mode)
+			}
+			_ = writer.Close()
+			request := httptest.NewRequest("POST", "/", &body)
+			request.Header.Set("Content-Type", writer.FormDataContentType())
+			input, err := parseCodeSubmission(httptest.NewRecorder(), request)
+			if mode == "unknown" {
+				if err == nil {
+					t.Fatal("unknown mode accepted")
+				}
+				return
+			}
+			want := domain.RunMode(mode)
+			if want == "" {
+				want = domain.RunModeSamples
+			}
+			if err != nil || input.RunMode != want {
+				t.Fatalf("mode=%s error=%v", input.RunMode, err)
+			}
+		})
+	}
+}

@@ -657,7 +657,7 @@ components:
             pids: {type: integer, minimum: 1, maximum: 128}
             stdout_bytes: {type: integer, minimum: 1, maximum: 65536}
             stderr_bytes: {type: integer, minimum: 1, maximum: 65536}
-            workspace_bytes: {type: integer, minimum: 1048576, maximum: 67108864}
+            workspace_bytes: {type: integer, minimum: 1048576, maximum: 10485760}
         cases:
           type: array
           minItems: 1
@@ -1013,6 +1013,10 @@ components:
           type: integer
         offset:
           type: integer
+    RunMode:
+      type: string
+      enum: [samples, graded]
+      default: samples
     CodeSubmissionInput:
       type: object
       additionalProperties: false
@@ -1024,6 +1028,8 @@ components:
       properties:
         task_version_id: { type: string, format: uuid }
         idempotency_key: { type: string, format: uuid }
+        run_mode:
+          $ref: "#/components/schemas/RunMode"
         language:
           $ref: "#/components/schemas/ProgrammingLanguage"
         file:
@@ -1071,6 +1077,7 @@ components:
         - execution_id
         - correlation_id
         - language
+        - run_mode
         - source_file_name
         - status
         - tests
@@ -1084,6 +1091,8 @@ components:
         task_version_number: { type: integer, minimum: 1 }
         execution_id: { type: string, format: uuid }
         correlation_id: { type: string, format: uuid }
+        run_mode:
+          $ref: "#/components/schemas/RunMode"
         language:
           $ref: "#/components/schemas/ProgrammingLanguage"
         source_file_name: { type: string, maxLength: 255 }

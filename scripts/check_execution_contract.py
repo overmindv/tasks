@@ -45,6 +45,24 @@ def check(root, peer=None):
                     invalid["execution"]["inputs"] = []
                     assert not validator.is_valid(invalid), "accepted empty stdin cases"
             checked += 1
+    request_schema = json.loads((schema_dir(root) / "sandbox.run.request.v1.json").read_text())
+    validator = Draft202012Validator(request_schema, format_checker=FormatChecker())
+    graded = json.loads((fixtures / "graded.request.json").read_text())
+    validator.validate(graded)
+    import hashlib
+    manifest_raw = (fixtures / "input-suite.json").read_bytes()
+    assert hashlib.sha256(manifest_raw).hexdigest() == graded["execution"]["suite"]["checksum_sha256"]
+    invalid = copy.deepcopy(graded)
+    invalid["execution"]["inputs"] = ["unexpected"]
+    assert not validator.is_valid(invalid), "accepted inputs and suite together"
+    for field in ("suite_id", "version", "checksum_sha256"):
+        invalid = copy.deepcopy(graded)
+        invalid["execution"]["suite"].pop(field)
+        assert not validator.is_valid(invalid), "accepted incomplete suite reference"
+    if peer:
+        for name in ("graded.request.json", "input-suite.json"):
+            assert (fixtures / name).read_bytes() == (peer / "tests/fixtures/execution-contract" / name).read_bytes(), "graded fixture drift"
+    checked += 1
     print(f"OK: {checked} fixtures, negative cases" + (", peer schemas/fixtures identical" if peer else ""))
 
 

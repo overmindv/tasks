@@ -6,7 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/overmindv/tasks/internal/domain"
 )
 
 // Константы контракта исполнения кода между tasks и sandbox
@@ -61,8 +65,9 @@ type Code struct {
 
 // ExecutionSpec задаёт execution-режим: исполнение кода по списку входных данных.
 type ExecutionSpec struct {
-	Mode   string   `json:"mode"`
-	Inputs []string `json:"inputs"`
+	Mode   string                 `json:"mode"`
+	Inputs []string               `json:"inputs,omitempty"`
+	Suite  *domain.SuiteReference `json:"suite,omitempty"`
 }
 
 // Limits описывает обязательные ограничения одного запуска.
@@ -195,8 +200,13 @@ func ValidateRunRequest(request RunRequest) error {
 	if request.Execution == nil || request.Execution.Mode != ExecutionMode {
 		return errors.New("execution.mode должен быть 'execution'")
 	}
-	if len(request.Execution.Inputs) == 0 {
+	if (len(request.Execution.Inputs) == 0) == (request.Execution.Suite == nil) {
 		return errors.New("для запуска нужен хотя бы один входной кейс")
+	}
+	if ref := request.Execution.Suite; ref != nil {
+		if request.Execution.Inputs != nil || ref.ID == uuid.Nil || !regexp.MustCompile(`^[0-9]{1,64}$`).MatchString(ref.Version) || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(ref.ChecksumSHA256) {
+			return errors.New("invalid immutable suite reference")
+		}
 	}
 	if request.Limits.CPUms <= 0 || request.Limits.Wallms <= 0 || request.Limits.MemoryMB <= 0 {
 		return errors.New("лимиты времени и памяти должны быть положительными")

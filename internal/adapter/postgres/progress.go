@@ -39,7 +39,7 @@ func (r *Postgres) VisitGradedAttempts(ctx context.Context, userID uuid.UUID, vi
 			UNION ALL
 			SELECT cs.task_id, tv.difficulty, cs.verdict, cs.completed_at AS occurred_at, cs.id AS attempt_id
 			FROM code_submissions cs JOIN task_versions tv ON tv.id = cs.task_version_id
-			WHERE cs.user_id = $1 AND cs.status = 'completed'
+			WHERE cs.user_id = $1 AND cs.status = 'completed' AND cs.run_mode = 'graded'
 		) attempts ORDER BY occurred_at, attempt_id`, userID)
 	if err != nil {
 		return fmt.Errorf("query practice attempts: %w", err)
@@ -80,7 +80,7 @@ func (r *Postgres) ListRatedUsers(ctx context.Context, topicIDs *[]uuid.UUID, li
 			FROM submissions s WHERE s.verdict = 'accepted'
 			UNION ALL
 			SELECT cs.user_id, cs.task_id, cs.task_version_id, cs.completed_at AS occurred_at, cs.id AS attempt_id
-			FROM code_submissions cs WHERE cs.status = 'completed' AND cs.verdict = 'accepted'
+			FROM code_submissions cs WHERE cs.status = 'completed' AND cs.run_mode = 'graded' AND cs.verdict = 'accepted'
 		), first_accepted AS (
 			SELECT DISTINCT ON (user_id, task_id) user_id, task_id, task_version_id
 			FROM accepted ORDER BY user_id, task_id, occurred_at, attempt_id

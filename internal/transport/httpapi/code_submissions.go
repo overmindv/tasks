@@ -124,6 +124,13 @@ func parseCodeSubmission(w http.ResponseWriter, r *http.Request) (usecase.CodeSu
 	if err != nil {
 		return usecase.CodeSubmissionInput{}, apperror.New(apperror.ValidationError, "idempotency_key должен быть UUID", http.StatusBadRequest)
 	}
+	mode := domain.RunModeSamples
+	if values := r.MultipartForm.Value["run_mode"]; len(values) == 1 {
+		mode = domain.RunMode(values[0])
+	}
+	if mode != domain.RunModeSamples && mode != domain.RunModeGraded {
+		return usecase.CodeSubmissionInput{}, apperror.New(apperror.ValidationError, "invalid run_mode", 400)
+	}
 	language := domain.ProgrammingLanguage(r.MultipartForm.Value["language"][0])
 
 	// Файловый вариант: решение загружено файлом.
@@ -146,6 +153,7 @@ func parseCodeSubmission(w http.ResponseWriter, r *http.Request) (usecase.CodeSu
 
 		return usecase.CodeSubmissionInput{
 			TaskVersionID:  versionID,
+			RunMode:        mode,
 			IdempotencyKey: idempotencyKey,
 			Language:       language,
 			SourceFileName: fileHeader.Filename,
@@ -161,6 +169,7 @@ func parseCodeSubmission(w http.ResponseWriter, r *http.Request) (usecase.CodeSu
 
 	return usecase.CodeSubmissionInput{
 		TaskVersionID:  versionID,
+		RunMode:        mode,
 		IdempotencyKey: idempotencyKey,
 		Language:       language,
 		SourceFileName: "",
@@ -176,6 +185,7 @@ func validateMultipartFields(form *multipart.Form) error {
 		"idempotency_key": {},
 		"language":        {},
 		"source_code":     {},
+		"run_mode":        {},
 	}
 	for key, values := range form.Value {
 		if _, ok := knownFields[key]; !ok {

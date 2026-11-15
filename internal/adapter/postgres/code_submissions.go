@@ -36,7 +36,7 @@ const codeSubmissionColumns = `
     cs.updated_at,
     cs.completed_at,
     cs.attempts,
-    cs.next_attempt_at`
+    cs.next_attempt_at, cs.run_mode`
 
 // FindCodeSubmissionByIdempotency ищет программное решение пользователя по ключу запроса.
 func (r *Postgres) FindCodeSubmissionByIdempotency(ctx context.Context, userID, key uuid.UUID) (*domain.CodeSubmission, error) {
@@ -58,11 +58,14 @@ func (r *Postgres) FindCodeSubmissionByIdempotency(ctx context.Context, userID, 
 
 // InsertCodeSubmission сохраняет решение до постановки события в outbox.
 func (r *Postgres) InsertCodeSubmission(ctx context.Context, submission domain.CodeSubmission) error {
+	if submission.RunMode == "" {
+		submission.RunMode = domain.RunModeSamples
+	}
 	_, err := r.query.Exec(ctx, `
         INSERT INTO code_submissions (
             id, user_id, task_id, task_version_id, execution_id, correlation_id,
-            idempotency_key, request_hash, language, source_file_name, source_code, status, attempts, next_attempt_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+            idempotency_key, request_hash, language, source_file_name, source_code, status, attempts, next_attempt_at, run_mode
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 		submission.ID,
 		submission.UserID,
 		submission.TaskID,
@@ -77,6 +80,7 @@ func (r *Postgres) InsertCodeSubmission(ctx context.Context, submission domain.C
 		submission.Status,
 		submission.Attempts,
 		submission.NextAttemptAt,
+		submission.RunMode,
 	)
 	if err != nil {
 		return fmt.Errorf("execute insert code submission: %w", err)
@@ -300,6 +304,7 @@ func scanCodeSubmission(row pgx.Row) (domain.CodeSubmission, error) {
 		&submission.CompletedAt,
 		&submission.Attempts,
 		&submission.NextAttemptAt,
+		&submission.RunMode,
 	)
 	if err != nil {
 		return domain.CodeSubmission{}, err

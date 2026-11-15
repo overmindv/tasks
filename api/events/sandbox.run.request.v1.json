@@ -141,8 +141,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "mode",
-        "inputs"
+        "mode"
       ],
       "properties": {
         "mode": {
@@ -156,8 +155,44 @@
             "type": "string",
             "maxLength": 1048576
           }
+        },
+        "suite": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "suite_id",
+            "version",
+            "checksum_sha256"
+          ],
+          "properties": {
+            "suite_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "version": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "maxLength": 64
+            },
+            "checksum_sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
         }
-      }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "inputs"
+          ]
+        },
+        {
+          "required": [
+            "suite"
+          ]
+        }
+      ]
     }
   },
   "$defs": {

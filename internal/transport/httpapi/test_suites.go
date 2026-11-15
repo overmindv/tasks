@@ -41,7 +41,7 @@ func (h *suiteHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input suiteDraftInput
-	if !decodeJSON(w, r, &input) {
+	if !decodeJSONLimit(w, r, &input, 8<<20) {
 		return
 	}
 	d, err := h.service.Create(r.Context(), id, input.BaseVersionID, input.Definition)
@@ -75,7 +75,7 @@ func (h *suiteHandler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input suiteDraftInput
-	if !decodeJSON(w, r, &input) {
+	if !decodeJSONLimit(w, r, &input, 8<<20) {
 		return
 	}
 	d, err := h.service.Update(r.Context(), id, input.Revision, input.Definition)
@@ -94,7 +94,7 @@ func (h *suiteHandler) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input suiteRevisionInput
-	if !decodeJSON(w, r, &input) {
+	if !decodeJSONLimit(w, r, &input, 8<<20) {
 		return
 	}
 	if err := h.service.Delete(r.Context(), id, input.Revision); err != nil {
@@ -113,7 +113,7 @@ func (h *suiteHandler) publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input suiteRevisionInput
-	if !decodeJSON(w, r, &input) {
+	if !decodeJSONLimit(w, r, &input, 8<<20) {
 		return
 	}
 	s, err := h.service.Publish(r.Context(), id, input.Revision, a.UserID)

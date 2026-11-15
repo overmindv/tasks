@@ -92,3 +92,12 @@ rollout небезопасен, поскольку старый код не со
 записи с истёкшим окном могут получить новый ID; их поздние результаты станут stale.
 История старых attempt ID отдельной таблицей не хранится. Defaults внутренних
 callers без policy — 3 попытки и 2 минуты; production использует валидируемый config.
+
+### Приватные наборы и режимы (OVM-242/243/244)
+
+Административный draft с CAS revision публикуется как новая TaskVersion и immutable
+suite binding. S3 получает только stdin; эталоны и checker хранятся в tasks.
+Samples проверяет examples и не участвует в прогрессе/рейтинге. Graded использует
+suite закреплённой версии; hidden stdout/stderr не сохраняются. Миграция трактует
+исторические code submissions как samples. Контракт, rollout и ограничения:
+[OVM-244](changes/OVM-244.md), [публикация suite](changes/OVM-243.md).

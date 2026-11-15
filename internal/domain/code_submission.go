@@ -78,7 +78,15 @@ type ExecutionFailure struct {
 }
 
 // CodeSubmission хранит файл решения и последний подтверждённый результат sandbox.
+type RunMode string
+
+const (
+	RunModeSamples RunMode = "samples"
+	RunModeGraded  RunMode = "graded"
+)
+
 type CodeSubmission struct {
+	RunMode           RunMode
 	ID                uuid.UUID
 	UserID            uuid.UUID
 	TaskID            uuid.UUID

@@ -99,6 +99,19 @@ func TestSuitePublishingPostgres(t *testing.T) {
 	}
 	definition := suiteDefinition()
 	definition.Cases[1].Output = "EXPECTED_ONLY_TASKS"
+	unsupported := suiteDefinition()
+	unsupported.LanguageVersion = "3.12.1"
+	unsupportedDraft, err := svc.Create(ctx, task.Task.ID, task.Version.ID, unsupported)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.Publish(ctx, unsupportedDraft.ID, 1, actor); err == nil {
+		t.Fatal("unsupported runtime published")
+	}
+	if len(objects.objects) != 0 {
+		t.Fatal("unsupported runtime uploaded")
+	}
+
 	draft, err := svc.Create(ctx, task.Task.ID, task.Version.ID, definition)
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +132,8 @@ func TestSuitePublishingPostgres(t *testing.T) {
 	if published.TaskVersionID == task.Version.ID {
 		t.Fatal("publish did not create version")
 	}
-	again, err := svc.Publish(ctx, draft.ID, 1, actor)
+	changedPolicy := usecase.NewSuiteService(store, objects, map[domain.ProgrammingLanguage]string{domain.ProgrammingLanguagePython: "3.13"})
+	again, err := changedPolicy.Publish(ctx, draft.ID, 1, actor)
 	if err != nil || again.TaskVersionID != published.TaskVersionID {
 		t.Fatal("repeat publish not idempotent")
 	}

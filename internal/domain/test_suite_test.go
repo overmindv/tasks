@@ -43,3 +43,11 @@ func TestSuiteInvariants(t *testing.T) {
 		t.Fatal("expected output excluded from checksum")
 	}
 }
+
+func TestSuiteWorkspaceMatchesSandbox(t *testing.T) {
+	s := validSuite()
+	s.Limits.WorkspaceBytes = 10485761
+	if ValidateSuite(s, false) == nil {
+		t.Fatal("suite exceeds sandbox hard limit")
+	}
+}

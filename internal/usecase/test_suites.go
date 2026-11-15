@@ -19,10 +19,18 @@ type SuiteObjectStore interface {
 type SuiteService struct {
 	repository repository.Repository
 	objects    SuiteObjectStore
+	versions   map[domain.ProgrammingLanguage]string
 }
 
-func NewSuiteService(r repository.Repository, o SuiteObjectStore) *SuiteService {
-	return &SuiteService{repository: r, objects: o}
+func NewSuiteService(r repository.Repository, o SuiteObjectStore, configured ...map[domain.ProgrammingLanguage]string) *SuiteService {
+	versions := map[domain.ProgrammingLanguage]string{domain.ProgrammingLanguagePython: "3.12", domain.ProgrammingLanguageGo: "1.26"}
+	if len(configured) > 0 {
+		versions = make(map[domain.ProgrammingLanguage]string)
+		for k, v := range configured[0] {
+			versions[k] = v
+		}
+	}
+	return &SuiteService{repository: r, objects: o, versions: versions}
 }
 func suiteConflict() error {
 	return apperror.New("SUITE_CONFLICT", "suite revision or task version changed", http.StatusConflict)
@@ -104,6 +112,9 @@ func (s *SuiteService) Publish(ctx context.Context, id uuid.UUID, revision int, 
 	}
 	if err := domain.ValidateSuite(d.Definition, true); err != nil {
 		return domain.PublishedSuite{}, validation(err)
+	}
+	if s.versions[d.Definition.Language] != d.Definition.LanguageVersion {
+		return domain.PublishedSuite{}, apperror.New(apperror.ValidationError, "suite runtime is not configured", 400)
 	}
 	if s.objects == nil {
 		return domain.PublishedSuite{}, apperror.New("SUITE_STORAGE_UNAVAILABLE", "suite storage unavailable", http.StatusServiceUnavailable)
