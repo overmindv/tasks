@@ -120,11 +120,21 @@ type codeSubmissionResponse struct {
 	Verdict           *domain.ExecutionVerdict     `json:"verdict,omitempty"`
 	Compilation       *domain.ExecutionPhaseResult `json:"compilation,omitempty"`
 	Execution         *domain.ExecutionPhaseResult `json:"execution,omitempty"`
-	Tests             []domain.ExecutionTestResult `json:"tests"`
+	Tests             []executionTestResponse      `json:"tests"`
 	Failure           *domain.ExecutionFailure     `json:"failure,omitempty"`
 	CreatedAt         time.Time                    `json:"created_at"`
 	UpdatedAt         time.Time                    `json:"updated_at"`
 	CompletedAt       *time.Time                   `json:"completed_at,omitempty"`
+}
+
+// Явный DTO не сериализует внутреннюю отметку публичности и будущие secret поля.
+type executionTestResponse struct {
+	TestID      string                  `json:"test_id"`
+	Verdict     domain.ExecutionVerdict `json:"verdict"`
+	Stdout      string                  `json:"stdout"`
+	Stderr      string                  `json:"stderr"`
+	DurationMS  int64                   `json:"duration_ms"`
+	MemoryBytes int64                   `json:"memory_bytes"`
 }
 
 type listResponse[T any] struct {
@@ -256,9 +266,10 @@ func responseSubmission(submission domain.Submission) submissionResponse {
 
 // responseCodeSubmission преобразует запуск в DTO без исходного кода пользователя.
 func responseCodeSubmission(submission domain.CodeSubmission) codeSubmissionResponse {
-	tests := submission.Tests
-	if tests == nil {
-		tests = []domain.ExecutionTestResult{}
+	submission = domain.PublicCodeSubmission(submission)
+	tests := make([]executionTestResponse, 0, len(submission.Tests))
+	for _, test := range submission.Tests {
+		tests = append(tests, executionTestResponse{TestID: test.TestID, Verdict: test.Verdict, Stdout: test.Stdout, Stderr: test.Stderr, DurationMS: test.DurationMS, MemoryBytes: test.MemoryBytes})
 	}
 
 	return codeSubmissionResponse{

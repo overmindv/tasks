@@ -134,3 +134,10 @@ func validRunRequest() RunRequest {
 		CreatedAt: time.Now().UTC(),
 	}
 }
+
+func TestSandboxCannotSetSampleVisibility(t *testing.T) {
+	payload := []byte(`{"schema_version":"sandbox.run.result.v1","submission_id":"submission","attempt_id":"attempt","status":"ok","created_at":"2026-08-31T10:00:00Z","cases":[{"index":0,"status":"ok","sample_visible":true,"stdout":"secret"}]}`)
+	if _, err := DecodeRunResult(payload); err == nil {
+		t.Fatal("sandbox forged public visibility marker")
+	}
+}

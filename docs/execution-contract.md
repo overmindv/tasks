@@ -108,3 +108,19 @@ outbox. При исчерпании попыток — infrastructure_error. С�
 result сообщений. HTTP/GraphQL и таблицы БД не меняются.
 Текущий suite содержит только открытые примеры. Hidden grading/sample separation
 не добавлены; OVM-244 остаётся отдельной задачей.
+
+## Публичный вывод OVM-247
+
+Только tasks после проверки suite/версии помечает case как sample_visible.
+Этот внутренний JSONB marker не принимается от sandbox и отсутствует в HTTP DTO.
+Public Get/ListMine и DTO скрывают неизвестные/legacy/hidden cases целиком,
+сохраняя общий verdict и метрики. Admin использует ту же проекцию. Raw phase
+stdout/stderr и sandbox error.code/message никогда не публикуются; новые failure
+сохраняются только в фиксированном безопасном формате. Открытые sample outputs
+сохраняются для обратной связи студенту.
+
+Новые hidden payload не копируются в tasks diagnostic storage (retention=0).
+Старые JSONB записи не переписываются, но закрыты проекцией. Подробная диагностика
+sandbox и её фактический retention cleanup отдельно не аудированы. Добавления
+SQL/HTTP/GraphQL schema не требуется; старые результаты без marker показывают
+aggregate, а не вывод кейсов. При rollback старого бинарника защита теряется.

@@ -1,7 +1,9 @@
 package kafka
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -231,4 +233,41 @@ func validResultPayload(submissionID, attemptID string) []byte {
         "trace_id":"trace-1",
         "created_at":"2026-08-31T10:00:00Z"
     }`, submissionID, attemptID))
+}
+
+func TestResultLogsNeverContainExecutionOutput(t *testing.T) {
+	for _, mode := range []string{"processed", "invalid", "mismatch"} {
+		t.Run(mode, func(t *testing.T) {
+			payload := validResultPayload(uuid.NewString(), uuid.NewString())
+			var result map[string]any
+			if err := json.Unmarshal(payload, &result); err != nil {
+				t.Fatal(err)
+			}
+			result["logs"] = map[string]any{"stdout": "HIDDEN_INPUT", "stderr": "HIDDEN_INPUT", "stdout_artifact": map[string]any{"url": "https://artifact.invalid/HIDDEN_INPUT"}}
+			result["error"] = map[string]any{"code": "HIDDEN_INPUT", "message": "HIDDEN_INPUT", "retryable": false}
+			if mode == "mismatch" {
+				result["submission_id"] = "HIDDEN_INPUT"
+				result["attempt_id"] = "HIDDEN_INPUT"
+			}
+			if mode == "invalid" {
+				result["unexpected"] = "HIDDEN_INPUT"
+			}
+			raw, err := json.Marshal(result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler := &fakeResultHandler{}
+			if mode == "mismatch" {
+				handler.handleErr = apperror.New(apperror.ExecutionResultMismatch, "mismatch", 409)
+			}
+			var logs bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&logs, nil))
+			if err := processResult(context.Background(), &kgo.Record{Topic: "results", Value: raw}, handler, logger); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(logs.String(), "HIDDEN_INPUT") || strings.Contains(logs.String(), "artifact.invalid") {
+				t.Fatalf("raw result logged: %s", logs.String())
+			}
+		})
+	}
 }

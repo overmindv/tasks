@@ -230,7 +230,7 @@ func (s *CodeSubmissionService) Get(ctx context.Context, submissionID, actorID u
 		return domain.CodeSubmission{}, apperror.New(apperror.PermissionDenied, "нет доступа к результату запуска", http.StatusForbidden)
 	}
 
-	return submission, nil
+	return domain.PublicCodeSubmission(submission), nil
 }
 
 // ListMine возвращает пагинированную историю программных решений пользователя.
@@ -241,7 +241,11 @@ func (s *CodeSubmissionService) ListMine(ctx context.Context, filter domain.Code
 		return nil, fmt.Errorf("list user code submissions: %w", err)
 	}
 
-	return items, nil
+	safe := make([]domain.CodeSubmission, len(items))
+	for i, item := range items {
+		safe[i] = domain.PublicCodeSubmission(item)
+	}
+	return safe, nil
 }
 
 // HandleRunResult дедуплицирует Kafka message, сверяет вывод кейсов с эталоном
@@ -551,18 +555,19 @@ func verdictFromRunResult(result execution.RunResult, expected []domain.TaskExam
 			best = verdict
 		}
 		tests = append(tests, domain.ExecutionTestResult{
-			TestID:      "open-" + strconv.Itoa(run.Index+1),
-			Verdict:     verdict,
-			Stdout:      run.Stdout,
-			Stderr:      run.Stderr,
-			DurationMS:  int64(run.CPUms),
-			MemoryBytes: run.MemoryPeakBytes,
+			SampleVisible: true,
+			TestID:        "open-" + strconv.Itoa(run.Index+1),
+			Verdict:       verdict,
+			Stdout:        run.Stdout,
+			Stderr:        run.Stderr,
+			DurationMS:    int64(run.CPUms),
+			MemoryBytes:   run.MemoryPeakBytes,
 		})
 	}
 
 	var failure *domain.ExecutionFailure
 	if result.Error != nil && best != domain.ExecutionVerdictAccepted {
-		failure = &domain.ExecutionFailure{Code: result.Error.Code, Message: result.Error.Message}
+		failure = domain.SafeExecutionFailure(best)
 	}
 
 	return best, tests, failure
@@ -587,7 +592,7 @@ func runLevelVerdict(result execution.RunResult) (domain.ExecutionVerdict, []dom
 	}
 	var failure *domain.ExecutionFailure
 	if result.Error != nil {
-		failure = &domain.ExecutionFailure{Code: result.Error.Code, Message: result.Error.Message}
+		failure = domain.SafeExecutionFailure(verdict)
 	}
 
 	return verdict, []domain.ExecutionTestResult{}, failure

@@ -108,6 +108,35 @@ func TestAttemptFencingPostgres(t *testing.T) {
 		}
 	}
 
+	t.Run("stored sample visibility and legacy privacy", func(t *testing.T) {
+		s := create()
+		if err := svc.HandleRunResult(ctx, meta(s, 1), result(s, "ok")); err != nil {
+			t.Fatal(err)
+		}
+		public := componentRawRequest(t, mux, http.MethodGet, "/v1/code-submissions/"+s.ID.String(), s.UserID.String(), "", nil, http.StatusOK)
+		if !strings.Contains(public.Body.String(), "hello") || strings.Contains(public.Body.String(), "sample_visible") {
+			t.Fatalf("sample output lost or internal marker leaked: %s", public.Body.String())
+		}
+		// Legacy/hidden данные не должны публиковаться даже при похожем на sample test_id.
+		_, err := pool.Exec(ctx, `UPDATE code_submissions SET
+   test_results='[{"test_id":"open-1","stdout":"HIDDEN_INPUT","stderr":"HIDDEN_INPUT"}]',
+   execution_result='{"stdout":"HIDDEN_INPUT","stderr":"HIDDEN_INPUT","duration_ms":42}',
+   error_code='HIDDEN_INPUT',error_message='https://artifact.invalid/HIDDEN_INPUT' WHERE id=$1`, s.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, route := range []struct{ path, user, role string }{
+			{"/v1/code-submissions/" + s.ID.String(), s.UserID.String(), ""},
+			{"/v1/code-submissions/" + s.ID.String(), admin, "admin"},
+			{"/v1/me/code-submissions", s.UserID.String(), ""},
+		} {
+			response := componentRawRequest(t, mux, http.MethodGet, route.path, route.user, route.role, nil, http.StatusOK)
+			if strings.Contains(response.Body.String(), "HIDDEN_INPUT") || !strings.Contains(response.Body.String(), `"tests":[]`) {
+				t.Fatalf("legacy leak: %s", response.Body.String())
+			}
+		}
+	})
+
 	t.Run("invalid complete result retries atomically", func(t *testing.T) {
 		for _, kind := range []string{"missing", "duplicate", "checksum", "run failure"} {
 			first := create()

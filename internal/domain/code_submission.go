@@ -60,12 +60,15 @@ type ExecutionPhaseResult struct {
 
 // ExecutionTestResult хранит результат одного теста без эталонного ответа.
 type ExecutionTestResult struct {
-	TestID      string           `json:"test_id"`
-	Verdict     ExecutionVerdict `json:"verdict"`
-	Stdout      string           `json:"stdout"`
-	Stderr      string           `json:"stderr"`
-	DurationMS  int64            `json:"duration_ms"`
-	MemoryBytes int64            `json:"memory_bytes"`
+	// SampleVisible задаётся только tasks после сопоставления с открытым примером.
+	// Отсутствующее поле у legacy/hidden результатов означает запрет публикации.
+	SampleVisible bool             `json:"sample_visible,omitempty"`
+	TestID        string           `json:"test_id"`
+	Verdict       ExecutionVerdict `json:"verdict"`
+	Stdout        string           `json:"stdout"`
+	Stderr        string           `json:"stderr"`
+	DurationMS    int64            `json:"duration_ms"`
+	MemoryBytes   int64            `json:"memory_bytes"`
 }
 
 // ExecutionFailure хранит машинный код и безопасное описание ошибки runner'а.

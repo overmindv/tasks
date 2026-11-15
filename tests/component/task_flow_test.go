@@ -199,6 +199,10 @@ func TestVersionedTaskFlow(t *testing.T) {
 		len(requestEvent.Execution.Inputs) != 1 || requestEvent.Execution.Inputs[0] != "hello" {
 		t.Fatalf("request event = %#v", requestEvent)
 	}
+	// Готовность fixture задаётся часами PostgreSQL: host и Docker clock могут различаться.
+	if _, err := pool.Exec(ctx, "UPDATE code_submission_outbox SET available_at=now()-interval '1 second' WHERE aggregate_id=$1", code.ID); err != nil {
+		t.Fatal(err)
+	}
 	claimToken := uuid.New()
 	claimed, err := store.ClaimOutboxMessages(ctx, 10, claimToken, time.Now().UTC().Add(time.Minute))
 	if err != nil || len(claimed) != 1 {
