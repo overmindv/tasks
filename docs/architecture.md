@@ -49,7 +49,7 @@ Transport DTO не используются как доменные или Postg
 6. Consumer строго проверяет JSON и совпадение `submission_id`, `execution_id` и `task_id` с сохранённым запуском. Inbox record и финальный результат сохраняются одной транзакцией, затем Kafka offset подтверждается.
 7. Вердикт вычисляется самим `tasks` из вывода кейсов (sandbox возвращает только вывод и метаданные). Финальные verdict'ы — в allowlist `domain.IsFinalExecutionVerdict`; `infrastructure_error`/`checker_error` никогда не помечают решение как неверное. Инфраструктурные ошибки переотправляются до лимита `MaxAttempts`, затем завершаются как `infrastructure_error`; заброшенные `queued`-запуски переотправляет reaper. Клиент опрашивает `GET /v1/code-submissions/{id}`: статусы `queued` и `completed`.
 
-Доставка request events — at-least-once: после Kafka ack и до PostgreSQL mark возможен повтор. Стабильный `execution_id` позволяет sandbox дедуплицировать запуск. Result events дедуплицируются одновременно по Kafka topic/partition/offset и `event_id`. Невалидные сообщения записываются в inbox без payload и подтверждаются, чтобы не создавать poison-message loop.
+Доставка request events — at-least-once: после Kafka ack и до PostgreSQL mark возможен повтор. Стабильный `attempt_id` внутри доставки позволяет sandbox дедуплицировать запуск; новый retry tasks получает новый ID. Result events дедуплицируются одновременно по Kafka topic/partition/offset и `event_id`. Невалидные сообщения записываются в inbox без payload и подтверждаются, чтобы не создавать poison-message loop.
 
 ### Повторная обработка результатов (OVM-255)
 
@@ -74,3 +74,21 @@ rebalance timeout 60 секунд. При исчерпании бюджета co
 Request logs не содержат body, исходный код, выбранные ответы или правильные варианты. HTTP API результата не возвращает исходный код. Kafka logs содержат только event/submission ID и topic metadata. Внутренние SQL-ошибки преобразуются в общий `INTERNAL_ERROR`.
 
 Точный wire-контракт и ограничения текущего retry: [execution-contract](execution-contract.md).
+
+### Изоляция попыток (OVM-245)
+
+`code_submissions.execution_id` — ID текущей попытки, `attempts` — её номер.
+При retry ID и номер меняются атомарно с outbox; `submission_id`/версия остаются.
+Reaper и result consumer берут row lock, повторно проверяют текущий ID и срок.
+`next_attempt_at` — общий deadline текущей попытки: первичное значение и каждое
+новое окно равны now + RetryGrace. Результат после срока обрабатывается как timeout,
+независимо от его created_at; исчерпание MaxAttempts даёт infrastructure_error.
+Результаты старой/завершённой попытки сохраняются в inbox со status=stale без payload.
+Ошибки БД остаются retryable, кроме подтверждённого отсутствия submission/version.
+
+Перед выкладкой применить 202611150001_execution_attempt_fencing.sql. Она расширяет
+inbox status constraint. Для перехода остановить старые workers/reaper: смешанный
+rollout небезопасен, поскольку старый код не соблюдает fencing. Старые queued
+записи с истёкшим окном могут получить новый ID; их поздние результаты станут stale.
+История старых attempt ID отдельной таблицей не хранится. Defaults внутренних
+callers без policy — 3 попытки и 2 минуты; production использует валидируемый config.

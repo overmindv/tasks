@@ -74,6 +74,13 @@ type CodeSubmissionService struct {
 
 // NewCodeSubmissionService создаёт сервис асинхронной проверки программных решений.
 func NewCodeSubmissionService(store repository.Repository, policy CodeExecutionPolicy) *CodeSubmissionService {
+	// Сохраняем безопасные defaults для внутренних callers без retry-настроек.
+	if policy.MaxAttempts <= 0 {
+		policy.MaxAttempts = 3
+	}
+	if policy.RetryGrace <= 0 {
+		policy.RetryGrace = 2 * time.Minute
+	}
 	return &CodeSubmissionService{
 		repository: store,
 		policy:     policy,
@@ -141,7 +148,7 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 			SourceCode:        input.SourceCode,
 			Status:            domain.CodeSubmissionStatusQueued,
 			Attempts:          1,
-			NextAttemptAt:     now,
+			NextAttemptAt:     now.Add(s.policy.RetryGrace),
 			Tests:             []domain.ExecutionTestResult{},
 			CreatedAt:         now,
 			UpdatedAt:         now,
@@ -242,36 +249,57 @@ func (s *CodeSubmissionService) ListMine(ctx context.Context, filter domain.Code
 func (s *CodeSubmissionService) HandleRunResult(ctx context.Context, metadata ExecutionMessageMetadata, result execution.RunResult) error {
 	record := executionInboxRecord(metadata, nil, execution.InboxStatusProcessed, "")
 	err := s.repository.WithinTransaction(ctx, func(tx repository.Repository) error {
-		inserted, err := tx.InsertExecutionInbox(ctx, record)
-		if err != nil {
-			return fmt.Errorf("insert processed result inbox: %w", err)
-		}
-		if !inserted {
-			return nil
-		}
 		submissionID, parseErr := uuid.Parse(result.SubmissionID)
 		if parseErr != nil {
 			return apperror.New(apperror.ExecutionResultMismatch, "результат содержит некорректный submission_id", http.StatusConflict)
 		}
-		current, err := tx.GetCodeSubmission(ctx, submissionID)
+		current, err := tx.GetCodeSubmissionForUpdate(ctx, submissionID)
 		if err != nil {
-			return apperror.New(apperror.ExecutionResultMismatch, "результат относится к неизвестному запуску", http.StatusConflict)
+			var public *apperror.Error
+			if errors.As(err, &public) && public.Code == apperror.CodeSubmissionNotFound {
+				return apperror.New(apperror.ExecutionResultMismatch, "unknown submission", http.StatusConflict)
+			}
+			return fmt.Errorf("lock code submission: %w", err)
 		}
-		if !matchesRunResult(current, result) {
+		// Проверяем базовую принадлежность отдельно от номера текущей попытки.
+		expected := current
+		parsedAttempt, parseErr := uuid.Parse(result.AttemptID)
+		if parseErr != nil || parsedAttempt == uuid.Nil {
+			return apperror.New(apperror.ExecutionResultMismatch, "invalid attempt_id", http.StatusConflict)
+		}
+		expected.ExecutionID = parsedAttempt
+		if !matchesRunResult(expected, result) {
 			return apperror.New(apperror.ExecutionResultMismatch, "идентификаторы результата не соответствуют запуску", http.StatusConflict)
 		}
-		if current.Status == domain.CodeSubmissionStatusCompleted {
+		now := time.Now().UTC()
+		expired := !now.Before(current.NextAttemptAt)
+		stale := current.ExecutionID != parsedAttempt || current.Status == domain.CodeSubmissionStatusCompleted
+		if stale || expired {
+			record.Status = execution.InboxStatusStale
+		}
+		inserted, err := tx.InsertExecutionInbox(ctx, record)
+		if err != nil {
+			return fmt.Errorf("insert result inbox: %w", err)
+		}
+		if !inserted || stale {
 			return nil
+		}
+		if expired {
+			return s.retryOrFail(ctx, tx, current, now)
 		}
 		version, err := tx.GetTaskVersion(ctx, current.TaskID, current.TaskVersionID)
 		if err != nil {
-			return apperror.New(apperror.ExecutionResultMismatch, "версия задачи результата не найдена", http.StatusConflict)
+			var public *apperror.Error
+			if errors.As(err, &public) && public.Code == apperror.TaskVersionNotFound {
+				return apperror.New(apperror.ExecutionResultMismatch, "task version not found", http.StatusConflict)
+			}
+			return fmt.Errorf("get result task version: %w", err)
 		}
 		verdict, tests, failure := verdictFromRunResult(result, openExamples(version.Examples))
 		// Инфраструктурная ошибка песочницы — не приговор для пользователя: пока не
 		// исчерпаны попытки, переотправляем запуск через outbox вместо завершения.
-		if codeSubmissionRetryable(verdict, result) && current.Attempts < s.policy.MaxAttempts {
-			return s.requeue(ctx, tx, current, version, time.Now().UTC())
+		if codeSubmissionRetryable(verdict, result) {
+			return s.retryOrFail(ctx, tx, current, now)
 		}
 		completedAt := result.CreatedAt.UTC()
 		executionPhase := executionPhaseFromResult(result)
@@ -347,13 +375,15 @@ func (s *CodeSubmissionService) requeue(ctx context.Context, tx repository.Repos
 	if len(open) == 0 {
 		return apperror.New(apperror.ExecutionResultMismatch, "версия задачи не содержит открытых примеров для переотправки", http.StatusConflict)
 	}
-	bumped, err := tx.BumpCodeSubmissionAttempt(ctx, current.ID, s.policy.MaxAttempts, at.Add(s.policy.RetryGrace))
+	nextExecutionID := uuid.New()
+	bumped, err := tx.BumpCodeSubmissionAttempt(ctx, current.ID, current.ExecutionID, nextExecutionID, s.policy.MaxAttempts, at.Add(s.policy.RetryGrace))
 	if err != nil {
 		return fmt.Errorf("bump code submission attempt: %w", err)
 	}
 	if !bumped {
 		return apperror.New(apperror.ExecutionResultMismatch, "запуск завершён конкурирующим обработчиком", http.StatusConflict)
 	}
+	current.ExecutionID = nextExecutionID
 	request := s.buildRunRequest(current, open, at)
 	payload, err := execution.EncodeRunRequest(request)
 	if err != nil {
@@ -397,49 +427,43 @@ func (s *CodeSubmissionService) RequeueStaleCodeSubmissions(ctx context.Context)
 // завершает при исчерпании попыток, иначе переотправляет.
 func (s *CodeSubmissionService) requeueOrFailOne(ctx context.Context, stale domain.CodeSubmission) error {
 	return s.repository.WithinTransaction(ctx, func(tx repository.Repository) error {
-		current, err := tx.GetCodeSubmission(ctx, stale.ID)
+		current, err := tx.GetCodeSubmissionForUpdate(ctx, stale.ID)
 		if err != nil {
-			return fmt.Errorf("get stale code submission: %w", err)
+			return fmt.Errorf("lock stale code submission: %w", err)
 		}
-		if current.Status != domain.CodeSubmissionStatusQueued {
+		now := time.Now().UTC()
+		if current.Status != domain.CodeSubmissionStatusQueued || current.ExecutionID != stale.ExecutionID || now.Before(current.NextAttemptAt) {
 			return nil
 		}
-		if current.Attempts >= s.policy.MaxAttempts {
-			verdict := domain.ExecutionVerdictInfrastructureError
-			failure := &domain.ExecutionFailure{
-				Code:    "attempts_exhausted",
-				Message: "песочница не ответила за отведённое число попыток",
-			}
-			completedAt := time.Now().UTC()
-			updated, err := tx.CompleteCodeSubmission(ctx, domain.CodeSubmission{
-				ID:            current.ID,
-				TaskID:        current.TaskID,
-				TaskVersionID: current.TaskVersionID,
-				ExecutionID:   current.ExecutionID,
-				CorrelationID: current.CorrelationID,
-				Status:        domain.CodeSubmissionStatusCompleted,
-				Verdict:       &verdict,
-				Tests:         []domain.ExecutionTestResult{},
-				Failure:       failure,
-				CompletedAt:   &completedAt,
-			})
-			if err != nil {
-				return fmt.Errorf("complete stalled code submission: %w", err)
-			}
-			if !updated {
-				// Конкурентно завершён (пришёл запоздавший результат) — не ошибка.
-				return nil
-			}
-
-			return nil
-		}
-		version, err := tx.GetTaskVersion(ctx, current.TaskID, current.TaskVersionID)
-		if err != nil {
-			return fmt.Errorf("get stale code submission version: %w", err)
-		}
-
-		return s.requeue(ctx, tx, current, version, time.Now().UTC())
+		return s.retryOrFail(ctx, tx, current, now)
 	})
+}
+
+// retryOrFail — общий переход consumer/reaper под блокировкой строки решения.
+func (s *CodeSubmissionService) retryOrFail(ctx context.Context, tx repository.Repository, current domain.CodeSubmission, at time.Time) error {
+	if current.Attempts >= s.policy.MaxAttempts {
+		verdict := domain.ExecutionVerdictInfrastructureError
+		updated, err := tx.CompleteCodeSubmission(ctx, domain.CodeSubmission{
+			ID: current.ID, TaskID: current.TaskID, TaskVersionID: current.TaskVersionID,
+			ExecutionID: current.ExecutionID, CorrelationID: current.CorrelationID,
+			Status: domain.CodeSubmissionStatusCompleted, Verdict: &verdict,
+			Tests:       []domain.ExecutionTestResult{},
+			Failure:     &domain.ExecutionFailure{Code: "attempts_exhausted", Message: "execution attempts exhausted"},
+			CompletedAt: &at,
+		})
+		if err != nil {
+			return fmt.Errorf("complete exhausted code submission: %w", err)
+		}
+		if !updated {
+			return apperror.New(apperror.ExecutionResultMismatch, "attempt changed during completion", http.StatusConflict)
+		}
+		return nil
+	}
+	version, err := tx.GetTaskVersion(ctx, current.TaskID, current.TaskVersionID)
+	if err != nil {
+		return fmt.Errorf("get retry task version: %w", err)
+	}
+	return s.requeue(ctx, tx, current, version, at)
 }
 
 // executionLimits строит sandbox-совместимые лимиты с учётом допустимых границ песочницы.

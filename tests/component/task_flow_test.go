@@ -89,6 +89,7 @@ func TestVersionedTaskFlow(t *testing.T) {
 		usecase.NewSubmissionService(store),
 		codeService,
 		usecase.NewCandidateService(store),
+		usecase.NewProblemListService(store),
 		logger,
 		"component-ingest-token",
 	)

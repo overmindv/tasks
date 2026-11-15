@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/overmindv/tasks/internal/apperror"
 	"github.com/overmindv/tasks/internal/domain"
 	"github.com/overmindv/tasks/internal/execution"
 	"github.com/overmindv/tasks/internal/repository"
@@ -73,7 +74,7 @@ func (r *codeSubmissionMemoryRepository) InsertCodeSubmission(_ context.Context,
 func (r *codeSubmissionMemoryRepository) GetCodeSubmission(_ context.Context, id uuid.UUID) (domain.CodeSubmission, error) {
 	submission, ok := r.submissions[id]
 	if !ok {
-		return domain.CodeSubmission{}, errors.New("submission not found")
+		return domain.CodeSubmission{}, apperror.New(apperror.CodeSubmissionNotFound, "submission not found", 404)
 	}
 
 	return submission, nil
@@ -106,7 +107,7 @@ func (r *codeSubmissionMemoryRepository) InsertExecutionInbox(_ context.Context,
 // CompleteCodeSubmission применяет финальный result event к тестовому запуску.
 func (r *codeSubmissionMemoryRepository) CompleteCodeSubmission(_ context.Context, result domain.CodeSubmission) (bool, error) {
 	current := r.submissions[result.ID]
-	if current.Status != domain.CodeSubmissionStatusQueued || r.failComplete {
+	if current.Status != domain.CodeSubmissionStatusQueued || current.ExecutionID != result.ExecutionID || r.failComplete {
 		return false, nil
 	}
 	current.Status = domain.CodeSubmissionStatusCompleted
@@ -122,11 +123,12 @@ func (r *codeSubmissionMemoryRepository) CompleteCodeSubmission(_ context.Contex
 }
 
 // BumpCodeSubmissionAttempt эмулирует guarded UPDATE попыток переотправки.
-func (r *codeSubmissionMemoryRepository) BumpCodeSubmissionAttempt(_ context.Context, id uuid.UUID, maxAttempts int, nextAttemptAt time.Time) (bool, error) {
+func (r *codeSubmissionMemoryRepository) BumpCodeSubmissionAttempt(_ context.Context, id, expectedExecutionID, nextExecutionID uuid.UUID, maxAttempts int, nextAttemptAt time.Time) (bool, error) {
 	current, ok := r.submissions[id]
-	if !ok || current.Status != domain.CodeSubmissionStatusQueued || current.Attempts >= maxAttempts {
+	if !ok || current.Status != domain.CodeSubmissionStatusQueued || current.Attempts >= maxAttempts || current.ExecutionID != expectedExecutionID || nextExecutionID == expectedExecutionID {
 		return false, nil
 	}
+	current.ExecutionID = nextExecutionID
 	current.Attempts++
 	current.NextAttemptAt = nextAttemptAt
 	current.UpdatedAt = time.Now().UTC()
@@ -384,6 +386,7 @@ func TestCodeSubmissionServiceRetriesInfraErrorThenExhausts(t *testing.T) {
 
 	// Первые две инфра-ошибки переотправляют запуск (attempts 1→2→3).
 	for i := 2; i <= 3; i++ {
+		infraResult.AttemptID = repo.submissions[created.ID].ExecutionID.String()
 		metadata := ExecutionMessageMetadata{Topic: "results", Partition: 0, Offset: int64(i), PayloadSHA256: strings.Repeat("a", 64)}
 		if err := service.HandleRunResult(context.Background(), metadata, infraResult); err != nil {
 			t.Fatalf("HandleRunResult(%d) error = %v", i, err)
@@ -403,6 +406,7 @@ func TestCodeSubmissionServiceRetriesInfraErrorThenExhausts(t *testing.T) {
 	}
 
 	// Третья (attempts == MaxAttempts) — завершаем infrastructure_error.
+	infraResult.AttemptID = repo.submissions[created.ID].ExecutionID.String()
 	metadata := ExecutionMessageMetadata{Topic: "results", Partition: 0, Offset: 4, PayloadSHA256: strings.Repeat("b", 64)}
 	if err := service.HandleRunResult(context.Background(), metadata, infraResult); err != nil {
 		t.Fatalf("HandleRunResult(final) error = %v", err)
@@ -682,12 +686,11 @@ func TestCodeSubmissionServiceUnknownResultIsPermanent(t *testing.T) {
 	}
 }
 
-// TestCodeSubmissionServiceMismatchedAttemptIsPermanent проверяет permanent-ветку
-// matchesRunResult: результат с корректным submission_id, но чужим attempt_id
-// не должен ретраиться consumer-ом.
-func TestCodeSubmissionServiceMismatchedAttemptIsPermanent(t *testing.T) {
+// TestCodeSubmissionServiceMismatchedAttemptIsStale проверяет сохранение чужой
+// попытки в stale inbox без изменения решения и повторной доставки.
+func TestCodeSubmissionServiceMismatchedAttemptIsStale(t *testing.T) {
 	t.Parallel()
-	_, service, taskID, versionID := newCodeSubmissionService()
+	repo, service, taskID, versionID := newCodeSubmissionService()
 	created, err := service.Submit(context.Background(), taskID, uuid.New(), CodeSubmissionInput{
 		TaskVersionID:  versionID,
 		IdempotencyKey: uuid.New(),
@@ -715,11 +718,16 @@ func TestCodeSubmissionServiceMismatchedAttemptIsPermanent(t *testing.T) {
 	}
 	metadata := ExecutionMessageMetadata{Topic: "results", Partition: 0, Offset: 20, PayloadSHA256: strings.Repeat("j", 64)}
 	err = service.HandleRunResult(context.Background(), metadata, result)
-	if err == nil {
-		t.Fatal("HandleRunResult() должен вернуть ошибку для чужого attempt_id")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !IsPermanentResultError(err) {
-		t.Fatalf("ошибка должна быть permanent (ExecutionResultMismatch), got: %v", err)
+	if repo.submissions[created.ID].Status != domain.CodeSubmissionStatusQueued {
+		t.Fatal("foreign attempt changed submission")
+	}
+	for _, record := range repo.inbox {
+		if record.Status != execution.InboxStatusStale {
+			t.Fatalf("inbox status = %s", record.Status)
+		}
 	}
 }
 
@@ -800,4 +808,8 @@ func newCodeSubmissionService() (*codeSubmissionMemoryRepository, *CodeSubmissio
 	})
 
 	return repo, service, taskID, versionID
+}
+
+func (r *codeSubmissionMemoryRepository) GetCodeSubmissionForUpdate(ctx context.Context, id uuid.UUID) (domain.CodeSubmission, error) {
+	return r.GetCodeSubmission(ctx, id)
 }

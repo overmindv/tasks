@@ -61,8 +61,8 @@ func (r *Postgres) InsertCodeSubmission(ctx context.Context, submission domain.C
 	_, err := r.query.Exec(ctx, `
         INSERT INTO code_submissions (
             id, user_id, task_id, task_version_id, execution_id, correlation_id,
-            idempotency_key, request_hash, language, source_file_name, source_code, status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+            idempotency_key, request_hash, language, source_file_name, source_code, status, attempts, next_attempt_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 		submission.ID,
 		submission.UserID,
 		submission.TaskID,
@@ -75,6 +75,8 @@ func (r *Postgres) InsertCodeSubmission(ctx context.Context, submission domain.C
 		submission.SourceFileName,
 		submission.SourceCode,
 		submission.Status,
+		submission.Attempts,
+		submission.NextAttemptAt,
 	)
 	if err != nil {
 		return fmt.Errorf("execute insert code submission: %w", err)
@@ -94,6 +96,18 @@ func (r *Postgres) GetCodeSubmission(ctx context.Context, id uuid.UUID) (domain.
 		return domain.CodeSubmission{}, notFound(err, apperror.CodeSubmissionNotFound, "результат запуска не найден")
 	}
 
+	return submission, nil
+}
+
+// GetCodeSubmissionForUpdate сериализует переходы попытки внутри транзакции.
+func (r *Postgres) GetCodeSubmissionForUpdate(ctx context.Context, id uuid.UUID) (domain.CodeSubmission, error) {
+	query := `SELECT ` + codeSubmissionColumns + `
+ FROM code_submissions cs INNER JOIN task_versions tv ON tv.id = cs.task_version_id
+ WHERE cs.id = $1 FOR UPDATE OF cs`
+	submission, err := scanCodeSubmission(r.query.QueryRow(ctx, query, id))
+	if err != nil {
+		return domain.CodeSubmission{}, notFound(err, apperror.CodeSubmissionNotFound, "code submission not found")
+	}
 	return submission, nil
 }
 
@@ -196,19 +210,24 @@ func (r *Postgres) CompleteCodeSubmission(ctx context.Context, result domain.Cod
 // BumpCodeSubmissionAttempt увеличивает счётчик переотправки queued-запуска.
 // UPDATE защищён статусом и верхней границей попыток: false означает, что
 // запуск завершён конкурентно или попытки исчерпаны.
-func (r *Postgres) BumpCodeSubmissionAttempt(ctx context.Context, id uuid.UUID, maxAttempts int, nextAttemptAt time.Time) (bool, error) {
+func (r *Postgres) BumpCodeSubmissionAttempt(ctx context.Context, id, expectedExecutionID, nextExecutionID uuid.UUID, maxAttempts int, nextAttemptAt time.Time) (bool, error) {
 	tag, err := r.query.Exec(ctx, `
         UPDATE code_submissions
         SET attempts = attempts + 1,
+            execution_id = $6,
             next_attempt_at = $3,
             updated_at = now()
         WHERE id = $1
           AND status = $2
-          AND attempts < $4`,
+          AND attempts < $4
+          AND execution_id = $5
+          AND $6 <> $5`,
 		id,
 		domain.CodeSubmissionStatusQueued,
 		nextAttemptAt,
 		maxAttempts,
+		expectedExecutionID,
+		nextExecutionID,
 	)
 	if err != nil {
 		return false, fmt.Errorf("execute bump code submission attempt: %w", err)

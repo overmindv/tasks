@@ -29,6 +29,7 @@ const (
 	ResultStatusUnsupportedLang = "unsupported_language"
 
 	InboxStatusProcessed       = "processed"
+	InboxStatusStale           = "stale"
 	InboxStatusRejected        = "rejected"
 	InboxErrorInvalidEvent     = "INVALID_EVENT"
 	InboxErrorUnsupportedEvent = "UNSUPPORTED_EVENT"

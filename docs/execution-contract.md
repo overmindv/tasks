@@ -57,11 +57,14 @@ Sandbox допускает 32 stdin-кейса и до 1 MiB вывода. Пр�
 5. Поздний результат предыдущей попытки не должен завершать текущую попытку.
    Reaper не должен конкурировать с ещё действующим бюджетом sandbox retry.
 
-**Открытый runtime gap OVM-245:** tasks requeue сейчас увеличивает attempts,
-но повторно использует execution_id/attempt_id. Поэтому sandbox может вернуть
-закешированный terminal result вместо нового исполнения. Fencing, новый UUID
-и согласование окна reaper с sandbox retry реализуются отдельно. Данная задача
-фиксирует один целевой контракт, а не объявляет эту политику уже внедрённой.
+**Реализовано OVM-245:** tasks атомарно меняет execution_id/attempt_id при retry
+и сохраняет новый request в outbox. Reaper и result consumer сериализуют переход
+по строке решения; completion и retry защищены CAS текущего execution_id.
+Поздние ответы записываются как stale inbox. Оба обработчика используют общий
+next_attempt_at текущей попытки и MaxAttempts; просроченный ответ не финализирует
+решение, а запускает тот же retry-or-exhausted переход, что reaper.
+RetryGrace должен покрывать очередь, выполнение и внутренние retries sandbox;
+новый глобальный SLA и удалённая отмена старого sandbox job не добавлены.
 
 Sandbox при исчерпании retry публикует известный terminal result или
 internal_error и DLQ; attempt_in_progress — исключение: активное исполнение не

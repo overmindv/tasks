@@ -1,0 +1,224 @@
+//go:build component
+
+package component
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	postgresadapter "github.com/overmindv/tasks/internal/adapter/postgres"
+	"github.com/overmindv/tasks/internal/domain"
+	"github.com/overmindv/tasks/internal/execution"
+	"github.com/overmindv/tasks/internal/repository"
+	"github.com/overmindv/tasks/internal/transport/httpapi"
+	"github.com/overmindv/tasks/internal/usecase"
+)
+
+func TestAttemptFencingPostgres(t *testing.T) {
+	ctx := context.Background()
+	dsn := os.Getenv("COMPONENT_TEST_DSN")
+	if dsn == "" {
+		t.Fatal("COMPONENT_TEST_DSN is required (dedicated database only)")
+	}
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	store := postgresadapter.New(pool)
+	policy := usecase.CodeExecutionPolicy{RequestsTopic: "requests", MaxAttempts: 3, RetryGrace: time.Minute, TimeLimit: time.Second, MemoryLimitBytes: 64 << 20}
+	svc := usecase.NewCodeSubmissionService(store, policy)
+	mux := http.NewServeMux()
+	httpapi.Register(mux, usecase.NewTaskService(store), usecase.NewSubmissionService(store), svc, usecase.NewCandidateService(store), usecase.NewProblemListService(store), slog.New(slog.NewTextHandler(io.Discard, nil)), "test-token")
+	admin := uuid.NewString()
+	task := componentTaskRequest(t, mux, http.MethodPost, "/v1/admin/tasks", admin, "admin", map[string]any{
+		"title": "Attempt fencing", "statement": "Echo", "task_type": "programming", "difficulty": "easy", "options": []any{},
+		"examples": []map[string]any{{"input": "hello", "output": "hello"}},
+	}, http.StatusCreated)
+	componentTaskRequest(t, mux, http.MethodPatch, "/v1/admin/tasks/"+task.ID+"/status", admin, "admin", map[string]string{"status": "published"}, http.StatusOK)
+	create := func() domain.CodeSubmission {
+		t.Helper()
+		s, err := svc.Submit(ctx, uuid.MustParse(task.ID), uuid.New(), usecase.CodeSubmissionInput{TaskVersionID: uuid.MustParse(task.TaskVersionID), IdempotencyKey: uuid.New(), Language: domain.ProgrammingLanguagePython, SourceCode: "print(input())"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	get := func(id uuid.UUID) domain.CodeSubmission {
+		t.Helper()
+		s, err := store.GetCodeSubmission(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	meta := func(s domain.CodeSubmission, n int64) usecase.ExecutionMessageMetadata {
+		return usecase.ExecutionMessageMetadata{Topic: s.ID.String(), Offset: n, PayloadSHA256: strings.Repeat("a", 64)}
+	}
+	result := func(s domain.CodeSubmission, status string) execution.RunResult {
+		r := execution.RunResult{SchemaVersion: execution.ResultSchemaVersion, SubmissionID: s.ID.String(), AttemptID: s.ExecutionID.String(), TaskID: s.TaskID.String(), Status: status, CreatedAt: time.Now().UTC()}
+		if status == "ok" {
+			r.Cases = []execution.CaseRunResult{{Index: 0, Status: "ok", Stdout: "hello"}}
+		}
+		return r
+	}
+	expire := func(s domain.CodeSubmission) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, "UPDATE code_submissions SET next_attempt_at=now()-interval '1 second' WHERE id=$1", s.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	countOutbox := func(s domain.CodeSubmission) int {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM code_submission_outbox WHERE aggregate_id=$1", s.ID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	together := func(actions ...func() error) {
+		t.Helper()
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		errs := make(chan error, len(actions))
+		for _, action := range actions {
+			wg.Add(1)
+			go func(fn func() error) { defer wg.Done(); <-start; errs <- fn() }(action)
+		}
+		close(start)
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	t.Run("concurrent reaper result and late delivery", func(t *testing.T) {
+		for i := 0; i < 8; i++ {
+			first := create()
+			persisted := get(first.ID)
+			if persisted.NextAttemptAt.Sub(persisted.CreatedAt) < 59*time.Second {
+				t.Fatal("initial deadline not persisted")
+			}
+			expire(first)
+			together(func() error { return svc.RequeueStaleCodeSubmissions(ctx) }, func() error { return svc.HandleRunResult(ctx, meta(first, 1), result(first, "ok")) })
+			second := get(first.ID)
+			if second.Attempts != 2 || second.ExecutionID == first.ExecutionID || second.Status != domain.CodeSubmissionStatusQueued || countOutbox(first) != 2 {
+				t.Fatalf("race created wrong state: attempts=%d outbox=%d", second.Attempts, countOutbox(first))
+			}
+			var raw []byte
+			if err := pool.QueryRow(ctx, "SELECT payload FROM code_submission_outbox WHERE aggregate_id=$1 ORDER BY created_at DESC LIMIT 1", first.ID).Scan(&raw); err != nil {
+				t.Fatal(err)
+			}
+			var request execution.RunRequest
+			if err := json.Unmarshal(raw, &request); err != nil {
+				t.Fatal(err)
+			}
+			if request.AttemptID != second.ExecutionID.String() || request.Metadata["task_version_id"] != second.TaskVersionID.String() {
+				t.Fatal("outbox identity mismatch")
+			}
+			if err := svc.HandleRunResult(ctx, meta(first, 2), result(first, "internal_error")); err != nil {
+				t.Fatal(err)
+			}
+			together(func() error { return svc.HandleRunResult(ctx, meta(second, 3), result(second, "ok")) }, func() error { return svc.HandleRunResult(ctx, meta(second, 3), result(second, "ok")) })
+			final := get(first.ID)
+			if final.Verdict == nil || *final.Verdict != domain.ExecutionVerdictAccepted || final.Attempts != 2 {
+				t.Fatalf("current result was not finalized: %#v", final)
+			}
+			var stale int
+			if err := pool.QueryRow(ctx, "SELECT count(*) FROM code_execution_result_inbox WHERE topic=$1 AND status='stale'", first.ID.String()).Scan(&stale); err != nil {
+				t.Fatal(err)
+			}
+			if stale != 2 {
+				t.Fatalf("stale inbox=%d want2", stale)
+			}
+		}
+	})
+	t.Run("duplicate infrastructure result creates one retry", func(t *testing.T) {
+		first := create()
+		together(func() error { return svc.HandleRunResult(ctx, meta(first, 1), result(first, "internal_error")) }, func() error { return svc.HandleRunResult(ctx, meta(first, 2), result(first, "internal_error")) })
+		if get(first.ID).Attempts != 2 || countOutbox(first) != 2 {
+			t.Fatal("duplicate consumed extra attempt")
+		}
+	})
+	t.Run("bounded mixed reaper and result retries", func(t *testing.T) {
+		first := create()
+		for i := 0; i < 4; i++ {
+			current := get(first.ID)
+			expire(current)
+			together(func() error { return svc.RequeueStaleCodeSubmissions(ctx) }, func() error {
+				return svc.HandleRunResult(ctx, meta(current, int64(i)), result(current, "internal_error"))
+			})
+		}
+		final := get(first.ID)
+		if final.Attempts != 3 || final.Verdict == nil || *final.Verdict != domain.ExecutionVerdictInfrastructureError || countOutbox(first) != 3 {
+			t.Fatalf("retry budget not enforced: attempts=%d outbox=%d", final.Attempts, countOutbox(first))
+		}
+	})
+	t.Run("outbox failure rolls back ID counter and inbox", func(t *testing.T) {
+		first := create()
+		broken := usecase.NewCodeSubmissionService(failingAttemptOutbox{store}, policy)
+		if err := broken.HandleRunResult(ctx, meta(first, 1), result(first, "internal_error")); err == nil {
+			t.Fatal("expected outbox failure")
+		}
+		current := get(first.ID)
+		if current.ExecutionID != first.ExecutionID || current.Attempts != 1 || countOutbox(first) != 1 {
+			t.Fatal("partial retry committed")
+		}
+		var n int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM code_execution_result_inbox WHERE topic=$1", first.ID.String()).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Fatal("inbox survived rollback")
+		}
+		if err := svc.HandleRunResult(ctx, meta(first, 1), result(first, "internal_error")); err != nil {
+			t.Fatal(err)
+		}
+		if get(first.ID).Attempts != 2 {
+			t.Fatal("retry after rollback did not recover")
+		}
+	})
+	t.Run("adapter CAS rejects stale attempt", func(t *testing.T) {
+		first := create()
+		next := uuid.New()
+		ok, err := store.BumpCodeSubmissionAttempt(ctx, first.ID, first.ExecutionID, next, 3, time.Now().Add(time.Minute))
+		if err != nil || !ok {
+			t.Fatalf("initial CAS: %v %v", ok, err)
+		}
+		ok, err = store.BumpCodeSubmissionAttempt(ctx, first.ID, first.ExecutionID, uuid.New(), 3, time.Now().Add(time.Minute))
+		if err != nil || ok {
+			t.Fatalf("stale CAS: %v %v", ok, err)
+		}
+		verdict := domain.ExecutionVerdictAccepted
+		now := time.Now().UTC()
+		first.Verdict = &verdict
+		first.CompletedAt = &now
+		ok, err = store.CompleteCodeSubmission(ctx, first)
+		if err != nil || ok {
+			t.Fatalf("stale completion CAS: %v %v", ok, err)
+		}
+	})
+}
+
+type failingAttemptOutbox struct{ repository.Repository }
+
+func (f failingAttemptOutbox) WithinTransaction(ctx context.Context, fn func(repository.Repository) error) error {
+	return f.Repository.WithinTransaction(ctx, func(tx repository.Repository) error { return fn(failingAttemptOutbox{tx}) })
+}
+func (f failingAttemptOutbox) InsertOutboxMessage(context.Context, domain.OutboxMessage) error {
+	return errors.New("injected outbox failure")
+}

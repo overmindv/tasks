@@ -33,6 +33,7 @@ type Repository interface {
 	FindCodeSubmissionByIdempotency(ctx context.Context, userID, key uuid.UUID) (*domain.CodeSubmission, error)
 	InsertCodeSubmission(ctx context.Context, submission domain.CodeSubmission) error
 	GetCodeSubmission(ctx context.Context, id uuid.UUID) (domain.CodeSubmission, error)
+	GetCodeSubmissionForUpdate(ctx context.Context, id uuid.UUID) (domain.CodeSubmission, error)
 	ListCodeSubmissions(ctx context.Context, filter domain.CodeSubmissionFilter) ([]domain.CodeSubmission, error)
 	InsertOutboxMessage(ctx context.Context, message domain.OutboxMessage) error
 	ClaimOutboxMessages(ctx context.Context, limit int, claimToken uuid.UUID, claimedUntil time.Time) ([]domain.OutboxMessage, error)
@@ -40,9 +41,9 @@ type Repository interface {
 	ReleaseOutboxMessage(ctx context.Context, id, claimToken uuid.UUID, availableAt time.Time, lastError string) error
 	InsertExecutionInbox(ctx context.Context, record domain.ExecutionInboxRecord) (bool, error)
 	CompleteCodeSubmission(ctx context.Context, result domain.CodeSubmission) (bool, error)
-	// BumpCodeSubmissionAttempt увеличивает счётчик переотправки queued-запуска
+	// BumpCodeSubmissionAttempt меняет ID и номер queued-попытки через CAS
 	// (false — если запуск завершён конкурентно или попытки исчерпаны).
-	BumpCodeSubmissionAttempt(ctx context.Context, id uuid.UUID, maxAttempts int, nextAttemptAt time.Time) (bool, error)
+	BumpCodeSubmissionAttempt(ctx context.Context, id, expectedExecutionID, nextExecutionID uuid.UUID, maxAttempts int, nextAttemptAt time.Time) (bool, error)
 	// FindExpiredQueuedCodeSubmissions возвращает queued-запуски, чьё окно
 	// следующей попытки истекло (sandbox не ответил).
 	FindExpiredQueuedCodeSubmissions(ctx context.Context, limit int) ([]domain.CodeSubmission, error)
