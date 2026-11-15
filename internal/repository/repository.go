@@ -10,6 +10,13 @@ import (
 
 // Repository задаёт операции хранения задач и пользовательских решений.
 type Repository interface {
+	GetPublishedSuite(ctx context.Context, taskID, versionID uuid.UUID) (*domain.PublishedSuite, error)
+	InsertPublishedSuite(ctx context.Context, suite domain.PublishedSuite) error
+	GetSuiteDraft(ctx context.Context, id uuid.UUID, lock bool) (domain.SuiteDraft, error)
+	InsertSuiteDraft(ctx context.Context, draft domain.SuiteDraft) error
+	UpdateSuiteDraft(ctx context.Context, draft domain.SuiteDraft, expectedRevision int) (bool, error)
+	DeleteSuiteDraft(ctx context.Context, id uuid.UUID, expectedRevision int) (bool, error)
+	MarkSuitePublished(ctx context.Context, id uuid.UUID, revision int, versionID uuid.UUID) (bool, error)
 	Ping(ctx context.Context) error
 	WithinTransaction(ctx context.Context, fn func(Repository) error) error
 	InsertTask(ctx context.Context, task domain.Task) error
