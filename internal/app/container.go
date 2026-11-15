@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/overmindv/parker"
@@ -12,6 +13,8 @@ import (
 	"github.com/overmindv/tasks/internal/transport/httpapi"
 	kafkaadapter "github.com/overmindv/tasks/internal/transport/kafka"
 	"github.com/overmindv/tasks/internal/usecase"
+
+	"github.com/overmindv/tasks/internal/adapter/suitestore"
 )
 
 // Build выполняет wiring бизнес-зависимостей tasks на каркас parker:
@@ -76,6 +79,14 @@ func Build(app *parker.App) error {
 		cfg.TaskHunterIngestToken,
 	)
 	httpapi.RegisterProgress(app.HTTP(), progressService, app.Logger())
+	var suiteObjects usecase.SuiteObjectStore
+	if os.Getenv("TASKS_SUITE_S3_ENDPOINT") != "" || os.Getenv("TASKS_SUITE_S3_BUCKET") != "" || os.Getenv("TASKS_SUITE_S3_ACCESS_KEY_ID") != "" || os.Getenv("TASKS_SUITE_S3_SECRET_ACCESS_KEY") != "" {
+		suiteObjects, err = suitestore.New(suitestore.Config{Endpoint: os.Getenv("TASKS_SUITE_S3_ENDPOINT"), Region: os.Getenv("TASKS_SUITE_S3_REGION"), Bucket: os.Getenv("TASKS_SUITE_S3_BUCKET"), AccessKey: os.Getenv("TASKS_SUITE_S3_ACCESS_KEY_ID"), SecretKey: os.Getenv("TASKS_SUITE_S3_SECRET_ACCESS_KEY"), Prefix: os.Getenv("TASKS_SUITE_S3_PREFIX")})
+		if err != nil {
+			return err
+		}
+	}
+	httpapi.RegisterSuites(app.HTTP(), usecase.NewSuiteService(store, suiteObjects), app.Logger())
 
 	dispatcher := kafkaadapter.NewOutboxDispatcher(store, producer, cfg.OutboxPollInterval, app.Logger())
 	consumer := kafkaadapter.NewResultConsumer(consumerClient, codeSubmissionService, app.Logger())

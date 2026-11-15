@@ -400,6 +400,164 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CodeSubmissionList"
+  /v1/admin/tasks/{id}/suite-drafts:
+    post:
+      summary: Создать приватный draft
+      description: Только admin. Закрытые данные запрещены в публичных API.
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRoles"
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SuiteDraftCreate"
+      responses:
+        "201":
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuiteDraft"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/suite-drafts/{id}:
+    get:
+      summary: Прочитать приватный draft
+      description: Только admin. Закрытые данные запрещены в публичных API.
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRoles"
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuiteDraft"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    put:
+      summary: Обновить неопубликованный draft
+      description: Только admin. Закрытые данные запрещены в публичных API.
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRoles"
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SuiteDraftUpdate"
+      responses:
+        "200":
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuiteDraft"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    delete:
+      summary: Удалить неопубликованный draft
+      description: Только admin. Закрытые данные запрещены в публичных API.
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRoles"
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SuiteRevision"
+      responses:
+        "204":
+          description: Успешно
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/suite-drafts/{id}/publish:
+    post:
+      summary: Опубликовать неизменяемый suite и новую версию задачи
+      description: Только admin. Закрытые данные запрещены в публичных API.
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRoles"
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SuiteRevision"
+      responses:
+        "200":
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuitePublication"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 components:
   parameters:
     UserID:
@@ -467,6 +625,78 @@ components:
         type: string
         format: uuid
   schemas:
+    SuiteRevision:
+      type: object
+      additionalProperties: false
+      required: [revision]
+      properties:
+        revision: {type: integer, minimum: 1}
+    SuiteReference:
+      type: object
+      required: [suite_id, version, checksum_sha256]
+      properties:
+        suite_id: {type: string, format: uuid}
+        version: {type: string}
+        checksum_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+    SuiteDefinition:
+      type: object
+      additionalProperties: false
+      required: [language, language_version, checker, limits, cases]
+      properties:
+        language: {type: string, enum: [python, go]}
+        language_version: {type: string, pattern: '^[0-9]+\.[0-9]+(\.[0-9]+)?$'}
+        checker: {type: string, enum: [exact, trim_newlines]}
+        limits:
+          type: object
+          additionalProperties: false
+          required: [cpu_ms, wall_ms, memory_mb, pids, stdout_bytes, stderr_bytes, workspace_bytes]
+          properties:
+            cpu_ms: {type: integer, minimum: 100, maximum: 30000}
+            wall_ms: {type: integer, minimum: 100, maximum: 60000}
+            memory_mb: {type: integer, minimum: 16, maximum: 1024}
+            pids: {type: integer, minimum: 1, maximum: 128}
+            stdout_bytes: {type: integer, minimum: 1, maximum: 65536}
+            stderr_bytes: {type: integer, minimum: 1, maximum: 65536}
+            workspace_bytes: {type: integer, minimum: 1048576, maximum: 67108864}
+        cases:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, input, output, hidden]
+            properties:
+              id: {type: string, pattern: '^[A-Za-z0-9_-]{1,64}$'}
+              input: {type: string, maxLength: 65536}
+              output: {type: string, maxLength: 65536}
+              hidden: {type: boolean}
+    SuiteDraftCreate:
+      type: object
+      required: [base_version_id, definition]
+      properties:
+        base_version_id: {type: string, format: uuid}
+        definition: {$ref: '#/components/schemas/SuiteDefinition'}
+    SuiteDraftUpdate:
+      type: object
+      required: [revision, definition]
+      properties:
+        revision: {type: integer, minimum: 1}
+        definition: {$ref: '#/components/schemas/SuiteDefinition'}
+    SuiteDraft:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        task_id: {type: string, format: uuid}
+        base_version_id: {type: string, format: uuid}
+        revision: {type: integer}
+        published_version_id: {type: string, format: uuid}
+        definition: {$ref: '#/components/schemas/SuiteDefinition'}
+    SuitePublication:
+      type: object
+      properties:
+        task_version_id: {type: string, format: uuid}
+        reference: {$ref: '#/components/schemas/SuiteReference'}
     TaskStatus:
       type: string
       enum: [draft, published, archived]
