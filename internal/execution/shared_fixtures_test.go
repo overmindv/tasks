@@ -36,6 +36,9 @@ func TestSharedExecutionFixtures(t *testing.T) {
 			if err := json.Unmarshal(payload, &request); err != nil {
 				t.Fatal(err)
 			}
+			if result.EvaluationContext == nil || result.EvaluationContext.TaskVersionID != request.Metadata["task_version_id"] || result.EvaluationContext.SuiteSHA256 != InputSuiteSHA256(request.Execution.Inputs) {
+				t.Fatal("fixture evaluation context does not match inputs/version")
+			}
 			encoded, err := EncodeRunRequest(request)
 			if err != nil {
 				t.Fatal(err)

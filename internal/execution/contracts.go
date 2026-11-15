@@ -137,15 +137,16 @@ type RunError struct {
 
 // RunResult описывает финальный ответ песочницы на запрос исполнения кода.
 type RunResult struct {
-	SchemaVersion string          `json:"schema_version"`
-	SubmissionID  string          `json:"submission_id"`
-	AttemptID     string          `json:"attempt_id"`
-	UserID        string          `json:"user_id,omitempty"`
-	TaskID        string          `json:"task_id,omitempty"`
-	Language      Language        `json:"language,omitempty"`
-	Status        string          `json:"status"`
-	Summary       ResultSummary   `json:"summary"`
-	Resources     ResultResources `json:"resources"`
+	EvaluationContext *EvaluationContext `json:"evaluation_context,omitempty"`
+	SchemaVersion     string             `json:"schema_version"`
+	SubmissionID      string             `json:"submission_id"`
+	AttemptID         string             `json:"attempt_id"`
+	UserID            string             `json:"user_id,omitempty"`
+	TaskID            string             `json:"task_id,omitempty"`
+	Language          Language           `json:"language,omitempty"`
+	Status            string             `json:"status"`
+	Summary           ResultSummary      `json:"summary"`
+	Resources         ResultResources    `json:"resources"`
 	// Timing, Logs и Tests sandbox всегда включает в result даже в execution-режиме.
 	// tasks их не использует, но объявляет через RawMessage, чтобы строгий декод
 	// (DisallowUnknownFields) не отклонял события песочницы как «невалидные».

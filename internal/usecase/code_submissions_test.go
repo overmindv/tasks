@@ -270,14 +270,15 @@ func TestCodeSubmissionServiceCompletesAndDeduplicatesResult(t *testing.T) {
 	}
 	exit := 0
 	result := execution.RunResult{
-		SchemaVersion: execution.ResultSchemaVersion,
-		SubmissionID:  created.ID.String(),
-		AttemptID:     created.ExecutionID.String(),
-		UserID:        created.UserID.String(),
-		TaskID:        created.TaskID.String(),
-		Status:        execution.ResultStatusOK,
-		Summary:       execution.ResultSummary{CasesTotal: 1},
-		Resources:     execution.ResultResources{CPUms: 10, MemoryPeakBytes: 1024, ExitCode: &exit},
+		SchemaVersion:     execution.ResultSchemaVersion,
+		SubmissionID:      created.ID.String(),
+		AttemptID:         created.ExecutionID.String(),
+		UserID:            created.UserID.String(),
+		TaskID:            created.TaskID.String(),
+		EvaluationContext: &execution.EvaluationContext{TaskVersionID: created.TaskVersionID.String(), SuiteSHA256: execution.InputSuiteSHA256([]string{"hello"})},
+		Status:            execution.ResultStatusOK,
+		Summary:           execution.ResultSummary{CasesTotal: 1},
+		Resources:         execution.ResultResources{CPUms: 10, MemoryPeakBytes: 1024, ExitCode: &exit},
 		Cases: []execution.CaseRunResult{
 			{Index: 0, Stdout: "hello", Status: execution.CaseStatusOK, CPUms: 10, MemoryPeakBytes: 1024},
 		},
@@ -305,7 +306,8 @@ func TestVerdictFromRunResult(t *testing.T) {
 	}
 
 	accepted := execution.RunResult{
-		Status: execution.ResultStatusOK,
+		Summary: execution.ResultSummary{CasesTotal: 2},
+		Status:  execution.ResultStatusOK,
 		Cases: []execution.CaseRunResult{
 			{Index: 0, Stdout: "1", Status: execution.CaseStatusOK},
 			{Index: 1, Stdout: "2", Status: execution.CaseStatusOK},
@@ -324,6 +326,7 @@ func TestVerdictFromRunResult(t *testing.T) {
 	}
 
 	tle := accepted
+	tle.Summary.CasesWithError = 1
 	tle.Cases[0] = execution.CaseRunResult{Index: 0, Status: execution.ResultStatusTimeLimit}
 	verdict, _, _ = verdictFromRunResult(tle, expected)
 	if verdict != domain.ExecutionVerdictTimeLimitExceeded {
@@ -338,6 +341,7 @@ func TestVerdictFromRunResult(t *testing.T) {
 
 	// B2: внутренняя ошибка песочницы на кейсе — infrastructure_error, а не wrong_answer.
 	infra := accepted
+	infra.Summary.CasesWithError = 1
 	infra.Cases[0] = execution.CaseRunResult{Index: 0, Status: execution.ResultStatusInternalError}
 	verdict, _, _ = verdictFromRunResult(infra, expected)
 	if verdict != domain.ExecutionVerdictInfrastructureError {
@@ -347,6 +351,7 @@ func TestVerdictFromRunResult(t *testing.T) {
 	// B2: infrastructure_error имеет приоритет над wrong_answer другого кейса
 	// (wrong_answer выводится из несовпадения stdout на «ok»-кейсе).
 	mixed := accepted
+	mixed.Summary.CasesWithError = 1
 	mixed.Cases[0] = execution.CaseRunResult{Index: 0, Status: execution.ResultStatusInternalError}
 	mixed.Cases[1] = execution.CaseRunResult{Index: 1, Status: execution.CaseStatusOK, Stdout: "x"}
 	verdict, _, _ = verdictFromRunResult(mixed, expected)
@@ -373,15 +378,16 @@ func TestCodeSubmissionServiceRetriesInfraErrorThenExhausts(t *testing.T) {
 	}
 
 	infraResult := execution.RunResult{
-		SchemaVersion: execution.ResultSchemaVersion,
-		SubmissionID:  created.ID.String(),
-		AttemptID:     created.ExecutionID.String(),
-		UserID:        created.UserID.String(),
-		TaskID:        created.TaskID.String(),
-		Status:        execution.ResultStatusInternalError,
-		Resources:     execution.ResultResources{CPUms: 10, MemoryPeakBytes: 1024},
-		Error:         &execution.RunError{Code: "worker_crash", Message: "sandbox worker died", Retryable: true},
-		CreatedAt:     time.Now().UTC(),
+		SchemaVersion:     execution.ResultSchemaVersion,
+		SubmissionID:      created.ID.String(),
+		AttemptID:         created.ExecutionID.String(),
+		UserID:            created.UserID.String(),
+		TaskID:            created.TaskID.String(),
+		EvaluationContext: &execution.EvaluationContext{TaskVersionID: created.TaskVersionID.String(), SuiteSHA256: execution.InputSuiteSHA256([]string{"hello"})},
+		Status:            execution.ResultStatusInternalError,
+		Resources:         execution.ResultResources{CPUms: 10, MemoryPeakBytes: 1024},
+		Error:             &execution.RunError{Code: "worker_crash", Message: "sandbox worker died", Retryable: true},
+		CreatedAt:         time.Now().UTC(),
 	}
 
 	// Первые две инфра-ошибки переотправляют запуск (attempts 1→2→3).
@@ -488,13 +494,15 @@ func TestCodeSubmissionServiceConcurrentCompletionIsPermanent(t *testing.T) {
 
 	exit := 0
 	result := execution.RunResult{
-		SchemaVersion: execution.ResultSchemaVersion,
-		SubmissionID:  created.ID.String(),
-		AttemptID:     created.ExecutionID.String(),
-		UserID:        created.UserID.String(),
-		TaskID:        created.TaskID.String(),
-		Status:        execution.ResultStatusOK,
-		Resources:     execution.ResultResources{CPUms: 10, MemoryPeakBytes: 1024, ExitCode: &exit},
+		SchemaVersion:     execution.ResultSchemaVersion,
+		SubmissionID:      created.ID.String(),
+		AttemptID:         created.ExecutionID.String(),
+		UserID:            created.UserID.String(),
+		TaskID:            created.TaskID.String(),
+		EvaluationContext: &execution.EvaluationContext{TaskVersionID: created.TaskVersionID.String(), SuiteSHA256: execution.InputSuiteSHA256([]string{"hello"})},
+		Status:            execution.ResultStatusOK,
+		Summary:           execution.ResultSummary{CasesTotal: 1},
+		Resources:         execution.ResultResources{CPUms: 10, MemoryPeakBytes: 1024, ExitCode: &exit},
 		Cases: []execution.CaseRunResult{
 			{Index: 0, Stdout: "hello", Status: execution.CaseStatusOK, CPUms: 10, MemoryPeakBytes: 1024},
 		},
@@ -557,15 +565,16 @@ func TestCodeSubmissionServiceNonRetryableCheckerErrorCompletes(t *testing.T) {
 		t.Fatalf("Submit() error = %v", err)
 	}
 	checkerResult := execution.RunResult{
-		SchemaVersion: execution.ResultSchemaVersion,
-		SubmissionID:  created.ID.String(),
-		AttemptID:     created.ExecutionID.String(),
-		UserID:        created.UserID.String(),
-		TaskID:        created.TaskID.String(),
-		Status:        execution.ResultStatusInvalidRequest,
-		Resources:     execution.ResultResources{CPUms: 10, MemoryPeakBytes: 1024},
-		Error:         &execution.RunError{Code: "invalid_request", Message: "входные данные не прошли валидацию", Retryable: false},
-		CreatedAt:     time.Now().UTC(),
+		SchemaVersion:     execution.ResultSchemaVersion,
+		SubmissionID:      created.ID.String(),
+		AttemptID:         created.ExecutionID.String(),
+		UserID:            created.UserID.String(),
+		TaskID:            created.TaskID.String(),
+		EvaluationContext: &execution.EvaluationContext{TaskVersionID: created.TaskVersionID.String(), SuiteSHA256: execution.InputSuiteSHA256([]string{"hello"})},
+		Status:            execution.ResultStatusInvalidRequest,
+		Resources:         execution.ResultResources{CPUms: 10, MemoryPeakBytes: 1024},
+		Error:             &execution.RunError{Code: "invalid_request", Message: "входные данные не прошли валидацию", Retryable: false},
+		CreatedAt:         time.Now().UTC(),
 	}
 	metadata := ExecutionMessageMetadata{Topic: "results", Partition: 0, Offset: 5, PayloadSHA256: strings.Repeat("e", 64)}
 	if err := service.HandleRunResult(context.Background(), metadata, checkerResult); err != nil {
@@ -600,15 +609,16 @@ func TestCodeSubmissionServiceRetryableCheckerErrorRequeues(t *testing.T) {
 		t.Fatalf("Submit() error = %v", err)
 	}
 	retryableResult := execution.RunResult{
-		SchemaVersion: execution.ResultSchemaVersion,
-		SubmissionID:  created.ID.String(),
-		AttemptID:     created.ExecutionID.String(),
-		UserID:        created.UserID.String(),
-		TaskID:        created.TaskID.String(),
-		Status:        execution.ResultStatusUnsupportedLang,
-		Resources:     execution.ResultResources{CPUms: 10, MemoryPeakBytes: 1024},
-		Error:         &execution.RunError{Code: "unsupported_language", Message: "рантайм временно недоступен", Retryable: true},
-		CreatedAt:     time.Now().UTC(),
+		SchemaVersion:     execution.ResultSchemaVersion,
+		SubmissionID:      created.ID.String(),
+		AttemptID:         created.ExecutionID.String(),
+		UserID:            created.UserID.String(),
+		TaskID:            created.TaskID.String(),
+		EvaluationContext: &execution.EvaluationContext{TaskVersionID: created.TaskVersionID.String(), SuiteSHA256: execution.InputSuiteSHA256([]string{"hello"})},
+		Status:            execution.ResultStatusUnsupportedLang,
+		Resources:         execution.ResultResources{CPUms: 10, MemoryPeakBytes: 1024},
+		Error:             &execution.RunError{Code: "unsupported_language", Message: "рантайм временно недоступен", Retryable: true},
+		CreatedAt:         time.Now().UTC(),
 	}
 	metadata := ExecutionMessageMetadata{Topic: "results", Partition: 0, Offset: 6, PayloadSHA256: strings.Repeat("g", 64)}
 	if err := service.HandleRunResult(context.Background(), metadata, retryableResult); err != nil {
@@ -703,14 +713,15 @@ func TestCodeSubmissionServiceMismatchedAttemptIsStale(t *testing.T) {
 	}
 	exit := 0
 	result := execution.RunResult{
-		SchemaVersion: execution.ResultSchemaVersion,
-		SubmissionID:  created.ID.String(),
-		AttemptID:     uuid.NewString(), // чужой attempt_id
-		UserID:        created.UserID.String(),
-		TaskID:        created.TaskID.String(),
-		Status:        execution.ResultStatusOK,
-		Summary:       execution.ResultSummary{CasesTotal: 1},
-		Resources:     execution.ResultResources{CPUms: 10, MemoryPeakBytes: 1024, ExitCode: &exit},
+		SchemaVersion:     execution.ResultSchemaVersion,
+		SubmissionID:      created.ID.String(),
+		AttemptID:         uuid.NewString(), // чужой attempt_id
+		UserID:            created.UserID.String(),
+		TaskID:            created.TaskID.String(),
+		EvaluationContext: &execution.EvaluationContext{TaskVersionID: created.TaskVersionID.String(), SuiteSHA256: execution.InputSuiteSHA256([]string{"hello"})},
+		Status:            execution.ResultStatusOK,
+		Summary:           execution.ResultSummary{CasesTotal: 1},
+		Resources:         execution.ResultResources{CPUms: 10, MemoryPeakBytes: 1024, ExitCode: &exit},
 		Cases: []execution.CaseRunResult{
 			{Index: 0, Stdout: "hello", Status: execution.CaseStatusOK},
 		},
@@ -751,15 +762,16 @@ func TestCodeSubmissionServiceRequeueWithoutExamplesIsPermanent(t *testing.T) {
 	repo.version.Examples = []domain.TaskExample{{Input: "1", Output: ""}}
 
 	infraResult := execution.RunResult{
-		SchemaVersion: execution.ResultSchemaVersion,
-		SubmissionID:  created.ID.String(),
-		AttemptID:     created.ExecutionID.String(),
-		UserID:        created.UserID.String(),
-		TaskID:        created.TaskID.String(),
-		Status:        execution.ResultStatusInternalError,
-		Resources:     execution.ResultResources{CPUms: 10, MemoryPeakBytes: 1024},
-		Error:         &execution.RunError{Code: "worker_crash", Message: "sandbox worker died", Retryable: true},
-		CreatedAt:     time.Now().UTC(),
+		SchemaVersion:     execution.ResultSchemaVersion,
+		SubmissionID:      created.ID.String(),
+		AttemptID:         created.ExecutionID.String(),
+		UserID:            created.UserID.String(),
+		TaskID:            created.TaskID.String(),
+		EvaluationContext: &execution.EvaluationContext{TaskVersionID: created.TaskVersionID.String(), SuiteSHA256: execution.InputSuiteSHA256([]string{"hello"})},
+		Status:            execution.ResultStatusInternalError,
+		Resources:         execution.ResultResources{CPUms: 10, MemoryPeakBytes: 1024},
+		Error:             &execution.RunError{Code: "worker_crash", Message: "sandbox worker died", Retryable: true},
+		CreatedAt:         time.Now().UTC(),
 	}
 	metadata := ExecutionMessageMetadata{Topic: "results", Partition: 0, Offset: 8, PayloadSHA256: strings.Repeat("k", 64)}
 	err = service.HandleRunResult(context.Background(), metadata, infraResult)

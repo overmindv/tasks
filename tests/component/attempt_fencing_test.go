@@ -68,7 +68,9 @@ func TestAttemptFencingPostgres(t *testing.T) {
 	}
 	result := func(s domain.CodeSubmission, status string) execution.RunResult {
 		r := execution.RunResult{SchemaVersion: execution.ResultSchemaVersion, SubmissionID: s.ID.String(), AttemptID: s.ExecutionID.String(), TaskID: s.TaskID.String(), Status: status, CreatedAt: time.Now().UTC()}
+		r.EvaluationContext = &execution.EvaluationContext{TaskVersionID: s.TaskVersionID.String(), SuiteSHA256: execution.InputSuiteSHA256([]string{"hello"})}
 		if status == "ok" {
+			r.Summary.CasesTotal = 1
 			r.Cases = []execution.CaseRunResult{{Index: 0, Status: "ok", Stdout: "hello"}}
 		}
 		return r
@@ -105,6 +107,45 @@ func TestAttemptFencingPostgres(t *testing.T) {
 			}
 		}
 	}
+
+	t.Run("invalid complete result retries atomically", func(t *testing.T) {
+		for _, kind := range []string{"missing", "duplicate", "checksum", "run failure"} {
+			first := create()
+			r := result(first, "ok")
+			switch kind {
+			case "missing":
+				r.Cases = nil
+				r.Summary.CasesTotal = 0
+			case "duplicate":
+				r.Cases = append(r.Cases, r.Cases[0])
+				r.Summary.CasesTotal = 2
+			case "checksum":
+				r.EvaluationContext.SuiteSHA256 = strings.Repeat("0", 64)
+			case "run failure":
+				r.Status = "internal_error"
+			}
+			if err := svc.HandleRunResult(ctx, meta(first, 1), r); err != nil {
+				t.Fatal(err)
+			}
+			next := get(first.ID)
+			if next.Attempts != 2 || next.Verdict != nil || next.ExecutionID == first.ExecutionID || countOutbox(first) != 2 {
+				t.Fatalf("%s accepted or not retried", kind)
+			}
+			if err := svc.HandleRunResult(ctx, meta(first, 1), r); err != nil {
+				t.Fatal(err)
+			}
+			if get(first.ID).Attempts != 2 || countOutbox(first) != 2 {
+				t.Fatal("duplicate retry")
+			}
+			if err := svc.HandleRunResult(ctx, meta(next, 2), result(next, "ok")); err != nil {
+				t.Fatal(err)
+			}
+			final := get(first.ID)
+			if final.Verdict == nil || *final.Verdict != domain.ExecutionVerdictAccepted {
+				t.Fatalf("%s did not recover", kind)
+			}
+		}
+	})
 
 	t.Run("concurrent reaper result and late delivery", func(t *testing.T) {
 		for i := 0; i < 8; i++ {

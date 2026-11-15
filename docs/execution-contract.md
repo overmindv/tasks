@@ -22,8 +22,11 @@ snapshots и проверяет отсутствие дрейфа. Старые 
   неизменяемую версию из code_submissions.task_version_id.
 - task_version_id не добавляется top-level в v1: строгие старые consumers отвергнут
   неизвестное поле. Existing metadata поддерживает scalar значения.
-- Ответ связан с версией через сохранённые submission/attempt; metadata не эхоится
-  sandbox в result. Изолированное сообщение результата не содержит всей версии.
+- OVM-246: новый tasks задаёт metadata.result_context_version="1". Только тогда
+  sandbox возвращает evaluation_context: task_version_id и suite_sha256.
+  Checksum вычисляется sandbox по фактическому упорядоченному execution.inputs
+  (SHA-256 от Go json.Marshal массива строк). Версия связывает входы с эталонами.
+  Это проверка корреляции доверенного runner, не аттестация его исполнения.
 - trace_id — существующий correlation ID; отдельный event_id в v1 не вводится.
 
 ## Режимы и профиль tasks
@@ -40,7 +43,10 @@ Sandbox допускает 32 stdin-кейса и до 1 MiB вывода. Пр�
 Схема описывает sandbox envelope; use-case policy/validators tasks добавляют
 собственные ограничения. JSON Schema maxLength считает Unicode code points,
 а runtime-лимиты размера stdin/output — UTF-8 байты; для многобайтных строк
-схема не заменяет runtime validation. Валидация полной матрицы результатов — OVM-246.
+схема не заменяет runtime validation. OVM-246 проверяет полную матрицу: число/уникальность/границы кейсов,
+summary, run-level failure, signal/exit code и усечение вывода.
+Неполный ok и несовпадение контекста запускают bounded retry, не accepted.
+Checker/config failure отделён от wrong_answer и infrastructure_error.
 Нельзя расширять output limits tasks только потому, что это допускает sandbox.
 
 ## Владельцы retry
@@ -90,3 +96,15 @@ v2 topic и миграции producer/consumer. Даже optional top-level по
 `--peer ../tasks` (для sandbox) проверяет равенство schemas и fixtures.
 CI каждого репозитория проверяет его snapshot независимо от sibling checkout.
 Тесты не исполняют пользовательский код и не требуют Kafka/gojudge.
+
+## Развёртывание расширения OVM-246
+
+Сначала обновить sandbox (старые запросы не получают нового поля), затем tasks.
+Tasks требует контекст версии/checksum для оценки. Старые queued результаты без
+контекста приводят к bounded retry с новым opt-in запросом, без изменения старого
+outbox. При исчерпании попыток — infrastructure_error. Смешанный rollout старых
+и новых tasks consumers небезопасен: старый строгий decoder не знает расширение.
+Перед переключением остановить старые consumers; rollback требует drain новых
+result сообщений. HTTP/GraphQL и таблицы БД не меняются.
+Текущий suite содержит только открытые примеры. Hidden grading/sample separation
+не добавлены; OVM-244 остаётся отдельной задачей.

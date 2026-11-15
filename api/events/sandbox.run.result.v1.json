@@ -326,6 +326,24 @@
           }
         }
       }
+    },
+    "evaluation_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_version_id",
+        "suite_sha256"
+      ],
+      "properties": {
+        "task_version_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "suite_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
     }
   },
   "$defs": {

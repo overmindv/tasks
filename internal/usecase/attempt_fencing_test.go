@@ -26,7 +26,10 @@ func fencingSubmission(t *testing.T) (*codeSubmissionMemoryRepository, *CodeSubm
 }
 func fencingResult(s domain.CodeSubmission, status string) execution.RunResult {
 	r := execution.RunResult{SchemaVersion: execution.ResultSchemaVersion, SubmissionID: s.ID.String(), AttemptID: s.ExecutionID.String(), TaskID: s.TaskID.String(), UserID: s.UserID.String(), Status: status, CreatedAt: time.Now().UTC(), Cases: []execution.CaseRunResult{{Index: 0, Status: "ok", Stdout: "hello\n"}}}
+	r.EvaluationContext = &execution.EvaluationContext{TaskVersionID: s.TaskVersionID.String(), SuiteSHA256: execution.InputSuiteSHA256([]string{"hello"})}
+	r.Summary.CasesTotal = 1
 	if status == "internal_error" {
+		r.Summary.CasesTotal = 0
 		r.Cases = nil
 	}
 	return r

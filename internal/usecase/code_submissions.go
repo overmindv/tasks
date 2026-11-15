@@ -214,7 +214,7 @@ func (s *CodeSubmissionService) buildRunRequest(submission domain.CodeSubmission
 			Inputs: exampleInputs(open),
 		},
 		Limits:    s.executionLimits(submission.Language),
-		Metadata:  map[string]any{"task_version_id": submission.TaskVersionID.String()},
+		Metadata:  map[string]any{"task_version_id": submission.TaskVersionID.String(), "result_context_version": "1"},
 		TraceID:   submission.CorrelationID.String(),
 		CreatedAt: now,
 	}
@@ -295,7 +295,12 @@ func (s *CodeSubmissionService) HandleRunResult(ctx context.Context, metadata Ex
 			}
 			return fmt.Errorf("get result task version: %w", err)
 		}
-		verdict, tests, failure := verdictFromRunResult(result, openExamples(version.Examples))
+		expectedCases := openExamples(version.Examples)
+		if result.EvaluationContext == nil || result.EvaluationContext.TaskVersionID != current.TaskVersionID.String() ||
+			result.EvaluationContext.SuiteSHA256 != execution.InputSuiteSHA256(exampleInputs(expectedCases)) {
+			return s.retryOrFail(ctx, tx, current, now)
+		}
+		verdict, tests, failure := verdictFromRunResult(result, expectedCases)
 		// Инфраструктурная ошибка песочницы — не приговор для пользователя: пока не
 		// исчерпаны попытки, переотправляем запуск через outbox вместо завершения.
 		if codeSubmissionRetryable(verdict, result) {
@@ -523,12 +528,23 @@ func executionPhaseFromResult(result execution.RunResult) *domain.ExecutionPhase
 // verdictFromRunResult сравнивает вывод каждого кейса с ожидаемым и выводит итоговый вердикт.
 // Вердикт вычисляется в tasks: sandbox возвращает только вывод и мета-данные.
 func verdictFromRunResult(result execution.RunResult, expected []domain.TaskExample) (domain.ExecutionVerdict, []domain.ExecutionTestResult, *domain.ExecutionFailure) {
+	if !validResultCases(result, len(expected)) {
+		return domain.ExecutionVerdictInfrastructureError, nil, &domain.ExecutionFailure{Code: "INVALID_EXECUTION_RESULT", Message: "invalid execution result"}
+	}
 	if len(result.Cases) == 0 {
 		return runLevelVerdict(result)
 	}
 
 	tests := make([]domain.ExecutionTestResult, 0, len(result.Cases))
 	best := domain.ExecutionVerdictAccepted
+	if result.Status != execution.ResultStatusOK {
+		best, _, _ = runLevelVerdict(result)
+	}
+	if (result.Resources.ExitCode != nil && *result.Resources.ExitCode != 0) || (result.Resources.Signal != nil && *result.Resources.Signal != "") {
+		if verdictPriority(domain.ExecutionVerdictRuntimeError) > verdictPriority(best) {
+			best = domain.ExecutionVerdictRuntimeError
+		}
+	}
 	for _, run := range result.Cases {
 		verdict := caseVerdict(run, expectedAt(expected, run.Index))
 		if verdictPriority(verdict) > verdictPriority(best) {
@@ -594,6 +610,15 @@ func caseVerdict(run execution.CaseRunResult, expectedOutput string) domain.Exec
 		// а не несовпадение вывода: решение нельзя помечать wrong_answer.
 		return domain.ExecutionVerdictInfrastructureError
 	}
+	if run.Status != execution.CaseStatusOK {
+		return domain.ExecutionVerdictInfrastructureError
+	}
+	if run.Truncated {
+		return domain.ExecutionVerdictOutputLimitExceeded
+	}
+	if run.Signal != nil && *run.Signal != "" {
+		return domain.ExecutionVerdictRuntimeError
+	}
 	if run.ExitCode != nil && *run.ExitCode != 0 {
 		return domain.ExecutionVerdictRuntimeError
 	}
@@ -618,6 +643,8 @@ func verdictPriority(verdict domain.ExecutionVerdict) int {
 	// Инфраструктурная ошибка — самый серьёзный вердикт: она отменяет
 	// любую ошибку, вызванную поведением пользовательского кода.
 	case domain.ExecutionVerdictInfrastructureError:
+		return 7
+	case domain.ExecutionVerdictCheckerError:
 		return 6
 	case domain.ExecutionVerdictOutputLimitExceeded:
 		return 5
@@ -709,7 +736,37 @@ func matchesRunResult(submission domain.CodeSubmission, result execution.RunResu
 		return false
 	}
 
-	return submission.ID == submissionID &&
+	return (result.UserID == "" || result.UserID == submission.UserID.String()) &&
+		(result.TraceID == "" || result.TraceID == submission.CorrelationID.String()) &&
+		(result.Language.ID == "" || result.Language.ID == string(submission.Language)) &&
+		submission.ID == submissionID &&
 		submission.ExecutionID == attemptID &&
 		submission.TaskID == taskID
+}
+
+// validResultCases проверяет уникальность, границы и счётчики до оценки stdout.
+// Частичный набор допустим только при явном run-level failure, но не при ok.
+func validResultCases(result execution.RunResult, expected int) bool {
+	if result.Summary.CasesTotal != len(result.Cases) || result.Summary.CasesWithError < 0 {
+		return false
+	}
+	if result.Status == execution.ResultStatusOK && (result.Error != nil || expected == 0 || len(result.Cases) != expected) {
+		return false
+	}
+	seen := make(map[int]bool, len(result.Cases))
+	errors := 0
+	for _, run := range result.Cases {
+		if run.Index < 0 || run.Index >= expected || seen[run.Index] {
+			return false
+		}
+		seen[run.Index] = true
+		switch run.Status {
+		case execution.CaseStatusOK:
+		case execution.ResultStatusTimeLimit, execution.ResultStatusMemoryLimit, execution.ResultStatusOutputLimit, execution.ResultStatusRuntimeError, execution.ResultStatusInternalError:
+			errors++
+		default:
+			return false
+		}
+	}
+	return result.Summary.CasesWithError == errors
 }

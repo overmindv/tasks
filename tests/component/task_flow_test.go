@@ -221,11 +221,12 @@ func TestVersionedTaskFlow(t *testing.T) {
 	}
 	zeroExit := 0
 	resultEvent := execution.RunResult{
-		SchemaVersion: execution.ResultSchemaVersion,
-		SubmissionID:  code.ID,
-		AttemptID:     code.ExecutionID,
-		TaskID:        code.TaskID,
-		Status:        execution.ResultStatusOK,
+		SchemaVersion:     execution.ResultSchemaVersion,
+		SubmissionID:      code.ID,
+		AttemptID:         code.ExecutionID,
+		TaskID:            code.TaskID,
+		EvaluationContext: &execution.EvaluationContext{TaskVersionID: code.TaskVersionID, SuiteSHA256: execution.InputSuiteSHA256([]string{"hello"})},
+		Status:            execution.ResultStatusOK,
 		Summary: execution.ResultSummary{
 			CasesTotal: 1,
 		},
