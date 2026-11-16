@@ -254,7 +254,7 @@ func (s *CodeSubmissionService) buildRunRequest(submission domain.CodeSubmission
 			Inputs: exampleInputs(open),
 		},
 		Limits:    s.executionLimits(submission.Language),
-		Metadata:  map[string]any{"task_version_id": submission.TaskVersionID.String(), "result_context_version": "1", "run_mode": string(submission.RunMode)},
+		Metadata:  map[string]any{"task_version_id": submission.TaskVersionID.String(), "result_context_version": "1", "run_mode": string(submission.RunMode), "attempt_deadline": submission.NextAttemptAt.Format(time.RFC3339Nano)},
 		TraceID:   submission.CorrelationID.String(),
 		CreatedAt: now,
 	}
@@ -447,6 +447,7 @@ func (s *CodeSubmissionService) requeue(ctx context.Context, tx repository.Repos
 		return apperror.New(apperror.ExecutionResultMismatch, "запуск завершён конкурирующим обработчиком", http.StatusConflict)
 	}
 	current.ExecutionID = nextExecutionID
+	current.NextAttemptAt = at.Add(s.policy.RetryGrace)
 	request := s.buildRunRequest(current, open, at)
 	applyExecutionSuite(&request, suite)
 	payload, err := execution.EncodeRunRequest(request)

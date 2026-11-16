@@ -52,6 +52,7 @@ type Repository interface {
 	CompleteCodeSubmission(ctx context.Context, result domain.CodeSubmission) (bool, error)
 	// BumpCodeSubmissionAttempt меняет ID и номер queued-попытки через CAS
 	// (false — если запуск завершён конкурентно или попытки исчерпаны).
+	ReplayCodeSubmission(ctx context.Context, id, expected, next, actor uuid.UUID, at, deadline time.Time) (bool, error)
 	BumpCodeSubmissionAttempt(ctx context.Context, id, expectedExecutionID, nextExecutionID uuid.UUID, maxAttempts int, nextAttemptAt time.Time) (bool, error)
 	// FindExpiredQueuedCodeSubmissions возвращает queued-запуски, чьё окно
 	// следующей попытки истекло (sandbox не ответил).

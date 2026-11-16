@@ -6,6 +6,36 @@ info:
 servers:
   - url: http://tasks:8080
 paths:
+  /v1/admin/code-submissions/{id}/replay:
+    post:
+      summary: Повторить инфраструктурную попытку с новым attempt ID
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRoles"
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_attempt_id]
+              properties:
+                expected_attempt_id: {type: string, format: uuid}
+      responses:
+        "202":
+          description: Новая попытка и audit атомарно записаны в outbox
+        "409":
+          description: Попытка изменилась или не допускает replay
+        "429":
+          description: Исчерпана ёмкость очереди
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /health:
     get:
       summary: Проверить liveness процесса
