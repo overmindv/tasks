@@ -99,3 +99,20 @@ func TestResultWrongUserIsRejected(t *testing.T) {
 		t.Fatalf("wrong user result was not rejected: %v", err)
 	}
 }
+
+// Вывод malicious fixtures sandbox не является доверенным отчётом checker.
+func TestSolutionOutputCannotForgeAccepted(t *testing.T) {
+	expected := []domain.TaskExample{{Input: "probe\n", Output: "TRUSTED_EXPECTED_42\n"}}
+	for _, output := range []string{"harness overwritten\n", `{"status":"passed","tests_passed":100}`, "", "expected unavailable\n"} {
+		result := execution.RunResult{Status: "ok", Summary: execution.ResultSummary{CasesTotal: 1}, Cases: []execution.CaseRunResult{{Index: 0, Status: "ok", Stdout: output}}}
+		verdict, _, _ := verdictFromRunResult(result, expected)
+		if verdict != domain.ExecutionVerdictWrongAnswer {
+			t.Fatalf("untrusted output accepted: %s", verdict)
+		}
+	}
+	result := execution.RunResult{Status: "invalid_request", Error: &execution.RunError{Code: "checker_error", Retryable: false}}
+	verdict, _, _ := verdictFromRunResult(result, expected)
+	if verdict != domain.ExecutionVerdictCheckerError {
+		t.Fatalf("protocol error misclassified: %s", verdict)
+	}
+}
