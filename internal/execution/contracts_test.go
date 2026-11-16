@@ -3,6 +3,7 @@ package execution
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"testing"
 	"time"
 
@@ -139,5 +140,25 @@ func TestSandboxCannotSetSampleVisibility(t *testing.T) {
 	payload := []byte(`{"schema_version":"sandbox.run.result.v1","submission_id":"submission","attempt_id":"attempt","status":"ok","created_at":"2026-08-31T10:00:00Z","cases":[{"index":0,"status":"ok","sample_visible":true,"stdout":"secret"}]}`)
 	if _, err := DecodeRunResult(payload); err == nil {
 		t.Fatal("sandbox forged public visibility marker")
+	}
+}
+
+func TestDecodePrivateCaseVisibility(t *testing.T) {
+	payload, err := os.ReadFile("../../tests/fixtures/execution-contract/execution.result.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err = json.Unmarshal(payload, &wire); err != nil {
+		t.Fatal(err)
+	}
+	wire["diagnostics_visibility"] = "private"
+	for _, c := range wire["cases"].([]any) {
+		c.(map[string]any)["diagnostics_visibility"] = "private"
+	}
+	payload, _ = json.Marshal(wire)
+	got, err := DecodeRunResult(payload)
+	if err != nil || got.DiagnosticsVisibility != "private" || got.Cases[0].DiagnosticsVisibility != "private" {
+		t.Fatalf("private result contract: %+v %v", got, err)
 	}
 }

@@ -99,16 +99,17 @@ type RunRequest struct {
 
 // CaseRunResult описывает результат исполнения одного входного кейса.
 type CaseRunResult struct {
-	Index           int     `json:"index"`
-	Stdout          string  `json:"stdout"`
-	Stderr          string  `json:"stderr"`
-	Truncated       bool    `json:"truncated"`
-	ExitCode        *int    `json:"exit_code"`
-	Signal          *string `json:"signal"`
-	CPUms           int     `json:"cpu_ms,omitempty"`
-	MemoryPeakBytes int64   `json:"memory_peak_bytes,omitempty"`
-	DurationMS      int     `json:"duration_ms,omitempty"`
-	Status          string  `json:"status"`
+	DiagnosticsVisibility string  `json:"diagnostics_visibility,omitempty"`
+	Index                 int     `json:"index"`
+	Stdout                string  `json:"stdout"`
+	Stderr                string  `json:"stderr"`
+	Truncated             bool    `json:"truncated"`
+	ExitCode              *int    `json:"exit_code"`
+	Signal                *string `json:"signal"`
+	CPUms                 int     `json:"cpu_ms,omitempty"`
+	MemoryPeakBytes       int64   `json:"memory_peak_bytes,omitempty"`
+	DurationMS            int     `json:"duration_ms,omitempty"`
+	Status                string  `json:"status"`
 }
 
 // ResultSummary содержит агрегированные счётчики полного запуска.
@@ -142,16 +143,17 @@ type RunError struct {
 
 // RunResult описывает финальный ответ песочницы на запрос исполнения кода.
 type RunResult struct {
-	EvaluationContext *EvaluationContext `json:"evaluation_context,omitempty"`
-	SchemaVersion     string             `json:"schema_version"`
-	SubmissionID      string             `json:"submission_id"`
-	AttemptID         string             `json:"attempt_id"`
-	UserID            string             `json:"user_id,omitempty"`
-	TaskID            string             `json:"task_id,omitempty"`
-	Language          Language           `json:"language,omitempty"`
-	Status            string             `json:"status"`
-	Summary           ResultSummary      `json:"summary"`
-	Resources         ResultResources    `json:"resources"`
+	DiagnosticsVisibility string             `json:"diagnostics_visibility,omitempty"`
+	EvaluationContext     *EvaluationContext `json:"evaluation_context,omitempty"`
+	SchemaVersion         string             `json:"schema_version"`
+	SubmissionID          string             `json:"submission_id"`
+	AttemptID             string             `json:"attempt_id"`
+	UserID                string             `json:"user_id,omitempty"`
+	TaskID                string             `json:"task_id,omitempty"`
+	Language              Language           `json:"language,omitempty"`
+	Status                string             `json:"status"`
+	Summary               ResultSummary      `json:"summary"`
+	Resources             ResultResources    `json:"resources"`
 	// Timing, Logs и Tests sandbox всегда включает в result даже в execution-режиме.
 	// tasks их не использует, но объявляет через RawMessage, чтобы строгий декод
 	// (DisallowUnknownFields) не отклонял события песочницы как «невалидные».

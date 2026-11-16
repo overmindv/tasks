@@ -323,6 +323,13 @@
           "duration_ms": {
             "type": "integer",
             "minimum": 0
+          },
+          "diagnostics_visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "private"
+            ]
           }
         }
       }
@@ -344,6 +351,13 @@
           "pattern": "^[a-f0-9]{64}$"
         }
       }
+    },
+    "diagnostics_visibility": {
+      "type": "string",
+      "enum": [
+        "public",
+        "private"
+      ]
     }
   },
   "$defs": {

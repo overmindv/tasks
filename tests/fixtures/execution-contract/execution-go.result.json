@@ -48,11 +48,13 @@
       "cpu_ms": 12,
       "memory_peak_bytes": 1024,
       "duration_ms": 15,
-      "status": "ok"
+      "status": "ok",
+      "diagnostics_visibility": "private"
     }
   ],
   "evaluation_context": {
     "task_version_id": "55555555-5555-4555-8555-555555555555",
     "suite_sha256": "ebed5dccc14b6c23538a8301a48fb3a7837ca3893d61f10fb5b4e9760dba2724"
-  }
+  },
+  "diagnostics_visibility": "private"
 }
