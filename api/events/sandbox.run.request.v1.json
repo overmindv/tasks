@@ -477,6 +477,40 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "required": [
+          "metadata"
+        ],
+        "properties": {
+          "metadata": {
+            "required": [
+              "result_context_version"
+            ],
+            "properties": {
+              "result_context_version": {
+                "const": "1"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "metadata": {
+            "required": [
+              "task_version_id"
+            ],
+            "properties": {
+              "task_version_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

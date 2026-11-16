@@ -21,7 +21,7 @@ def check(root, peer=None):
         validator = Draft202012Validator(schema, format_checker=FormatChecker())
         if peer:
             assert schema == json.loads((schema_dir(peer) / name).read_text()), f"schema drift: {name}"
-        for mode in ("execution", "pytest", "go-test"):
+        for mode in ("execution", "execution-go", "pytest", "go-test"):
             path = fixtures / f"{mode}.{kind}.json"
             payload = json.loads(path.read_text())
             if peer:
@@ -37,7 +37,13 @@ def check(root, peer=None):
                 invalid.pop("tests", None)
                 invalid.pop("execution", None)
                 assert not validator.is_valid(invalid), "accepted request without execution mode"
-                if mode == "execution":
+                if mode.startswith("execution"):
+                    invalid = copy.deepcopy(payload)
+                    invalid["metadata"]["task_version_id"] = "not-a-uuid"
+                    assert not validator.is_valid(invalid), "accepted invalid task version"
+                    invalid = copy.deepcopy(payload)
+                    invalid["execution"]["mode"] = "unknown"
+                    assert not validator.is_valid(invalid), "accepted unknown execution mode"
                     # Go сериализует zero-value TestSpec даже при omitempty.
                     payload["tests"] = {"mode": "", "source": ""}
                     validator.validate(payload)
