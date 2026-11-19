@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/overmindv/tasks/internal/domain"
+	"github.com/overmindv/tasks/internal/observability"
 	"github.com/overmindv/tasks/internal/repository"
 )
 
@@ -22,6 +23,12 @@ type OutboxDispatcher struct {
 	publisher    Publisher
 	pollInterval time.Duration
 	logger       *slog.Logger
+	metrics      *observability.Execution
+}
+
+func (d *OutboxDispatcher) WithExecutionMetrics(metrics *observability.Execution) *OutboxDispatcher {
+	d.metrics = metrics
+	return d
 }
 
 // NewOutboxDispatcher создаёт dispatcher с ограниченной частотой polling.
@@ -45,7 +52,7 @@ func (d *OutboxDispatcher) Run(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return nil
 			}
-			d.logger.ErrorContext(ctx, "outbox dispatch: временная ошибка, повтор", "error", err)
+			d.logger.ErrorContext(ctx, "execution outbox dispatch failed", "retry_after", d.pollInterval)
 			select {
 			case <-ctx.Done():
 				return nil
@@ -80,6 +87,7 @@ func (d *OutboxDispatcher) dispatch(ctx context.Context) error {
 // publishOne очищает payload после ack или назначает bounded retry при ошибке Kafka.
 func (d *OutboxDispatcher) publishOne(ctx context.Context, claimToken uuid.UUID, message domain.OutboxMessage) error {
 	err := d.publisher.Publish(ctx, message.Topic, message.MessageKey, message.Payload)
+	d.metrics.Publish(err == nil)
 	if err == nil {
 		if err := d.repository.MarkOutboxPublished(ctx, message.ID, claimToken); err != nil {
 			return fmt.Errorf("confirm published outbox message %s: %w", message.ID, err)
@@ -87,22 +95,25 @@ func (d *OutboxDispatcher) publishOne(ctx context.Context, claimToken uuid.UUID,
 		d.logger.InfoContext(ctx, "Kafka request event опубликован",
 			"event_id", message.ID,
 			"submission_id", message.AggregateID,
+			"correlation_id", message.CorrelationID,
 			"topic", message.Topic,
 		)
 
 		return nil
 	}
 	retryAt := time.Now().UTC().Add(outboxRetryDelay(message.Attempts))
-	if releaseErr := d.repository.ReleaseOutboxMessage(ctx, message.ID, claimToken, retryAt, err.Error()); releaseErr != nil {
-		return fmt.Errorf("release failed outbox message %s after %v: %w", message.ID, err, releaseErr)
+	const errorCode = "kafka_publish_failed"
+	if releaseErr := d.repository.ReleaseOutboxMessage(ctx, message.ID, claimToken, retryAt, errorCode); releaseErr != nil {
+		return fmt.Errorf("release failed outbox message %s: %w", message.ID, releaseErr)
 	}
 	d.logger.WarnContext(ctx, "публикация Kafka request event отложена",
 		"event_id", message.ID,
 		"submission_id", message.AggregateID,
+		"correlation_id", message.CorrelationID,
 		"topic", message.Topic,
 		"attempt", message.Attempts+1,
 		"retry_at", retryAt,
-		"error", err,
+		"error_code", errorCode,
 	)
 
 	return nil

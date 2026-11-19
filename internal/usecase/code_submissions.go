@@ -16,6 +16,7 @@ import (
 	"github.com/overmindv/tasks/internal/apperror"
 	"github.com/overmindv/tasks/internal/domain"
 	"github.com/overmindv/tasks/internal/execution"
+	"github.com/overmindv/tasks/internal/observability"
 	"github.com/overmindv/tasks/internal/repository"
 )
 
@@ -74,6 +75,7 @@ type ExecutionMessageMetadata struct {
 type CodeSubmissionService struct {
 	repository repository.Repository
 	policy     CodeExecutionPolicy
+	metrics    *observability.Execution
 }
 
 // NewCodeSubmissionService создаёт сервис асинхронной проверки программных решений.
@@ -132,6 +134,7 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 		return sameModeSubmission(*existing, hash, legacyCodeRequestHash(taskID, input), input.RunMode)
 	}
 	var submission domain.CodeSubmission
+	created := false
 	err = s.repository.WithinTransaction(ctx, func(tx repository.Repository) error {
 		own, total, err := tx.CodeAdmissionUsage(ctx, userID)
 		if err != nil {
@@ -213,6 +216,7 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 			return fmt.Errorf("insert execution request into outbox: %w", err)
 		}
 
+		created = true
 		return nil
 	})
 	if err != nil {
@@ -224,6 +228,9 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 		return domain.CodeSubmission{}, fmt.Errorf("submit code solution: %w", err)
 	}
 
+	if created {
+		s.metrics.Attempt(observability.InitialAttempt)
+	}
 	return submission, nil
 }
 
@@ -292,6 +299,7 @@ func (s *CodeSubmissionService) ListMine(ctx context.Context, filter domain.Code
 // и атомарно завершает ожидающее решение.
 func (s *CodeSubmissionService) HandleRunResult(ctx context.Context, metadata ExecutionMessageMetadata, result execution.RunResult) error {
 	record := executionInboxRecord(metadata, nil, execution.InboxStatusProcessed, "")
+	var transition executionTransition
 	err := s.repository.WithinTransaction(ctx, func(tx repository.Repository) error {
 		submissionID, parseErr := uuid.Parse(result.SubmissionID)
 		if parseErr != nil {
@@ -329,7 +337,7 @@ func (s *CodeSubmissionService) HandleRunResult(ctx context.Context, metadata Ex
 			return nil
 		}
 		if expired {
-			return s.retryOrFail(ctx, tx, current, now)
+			return s.retryOrFail(ctx, tx, current, now, &transition)
 		}
 		version, err := tx.GetTaskVersion(ctx, current.TaskID, current.TaskVersionID)
 		if err != nil {
@@ -349,7 +357,7 @@ func (s *CodeSubmissionService) HandleRunResult(ctx context.Context, metadata Ex
 		}
 		if result.EvaluationContext == nil || result.EvaluationContext.TaskVersionID != current.TaskVersionID.String() ||
 			result.EvaluationContext.SuiteSHA256 != execution.InputSuiteSHA256(exampleInputs(expectedCases)) {
-			return s.retryOrFail(ctx, tx, current, now)
+			return s.retryOrFail(ctx, tx, current, now, &transition)
 		}
 		verdict, tests, failure := verdictFromRunResult(result, expectedCases)
 		if suite != nil {
@@ -358,7 +366,7 @@ func (s *CodeSubmissionService) HandleRunResult(ctx context.Context, metadata Ex
 		// Инфраструктурная ошибка песочницы — не приговор для пользователя: пока не
 		// исчерпаны попытки, переотправляем запуск через outbox вместо завершения.
 		if codeSubmissionRetryable(verdict, result) {
-			return s.retryOrFail(ctx, tx, current, now)
+			return s.retryOrFail(ctx, tx, current, now, &transition)
 		}
 		completedAt := result.CreatedAt.UTC()
 		executionPhase := executionPhaseFromResult(result)
@@ -384,12 +392,13 @@ func (s *CodeSubmissionService) HandleRunResult(ctx context.Context, metadata Ex
 			return apperror.New(apperror.ExecutionResultMismatch, "запуск завершён конкурирующим обработчиком", http.StatusConflict)
 		}
 
+		transition = finalTransition(current, verdict)
 		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("handle execution result: %w", err)
 	}
-
+	transition.observe(s.metrics)
 	return nil
 }
 
@@ -400,7 +409,9 @@ func (s *CodeSubmissionService) RejectResult(ctx context.Context, metadata Execu
 	if err != nil {
 		return fmt.Errorf("insert rejected result inbox: %w", err)
 	}
-	_ = inserted
+	if inserted {
+		s.metrics.Rejected(errorCode)
+	}
 
 	return nil
 }
@@ -491,7 +502,8 @@ func (s *CodeSubmissionService) RequeueStaleCodeSubmissions(ctx context.Context)
 // requeueOrFailOne решает судьбу одного заброшенного запуска в отдельной транзакции:
 // завершает при исчерпании попыток, иначе переотправляет.
 func (s *CodeSubmissionService) requeueOrFailOne(ctx context.Context, stale domain.CodeSubmission) error {
-	return s.repository.WithinTransaction(ctx, func(tx repository.Repository) error {
+	var transition executionTransition
+	err := s.repository.WithinTransaction(ctx, func(tx repository.Repository) error {
 		current, err := tx.GetCodeSubmissionForUpdate(ctx, stale.ID)
 		if err != nil {
 			return fmt.Errorf("lock stale code submission: %w", err)
@@ -500,12 +512,16 @@ func (s *CodeSubmissionService) requeueOrFailOne(ctx context.Context, stale doma
 		if current.Status != domain.CodeSubmissionStatusQueued || current.ExecutionID != stale.ExecutionID || now.Before(current.NextAttemptAt) {
 			return nil
 		}
-		return s.retryOrFail(ctx, tx, current, now)
+		return s.retryOrFail(ctx, tx, current, now, &transition)
 	})
+	if err == nil {
+		transition.observe(s.metrics)
+	}
+	return err
 }
 
 // retryOrFail — общий переход consumer/reaper под блокировкой строки решения.
-func (s *CodeSubmissionService) retryOrFail(ctx context.Context, tx repository.Repository, current domain.CodeSubmission, at time.Time) error {
+func (s *CodeSubmissionService) retryOrFail(ctx context.Context, tx repository.Repository, current domain.CodeSubmission, at time.Time, transition *executionTransition) error {
 	if current.Attempts >= s.policy.MaxAttempts {
 		verdict := domain.ExecutionVerdictInfrastructureError
 		updated, err := tx.CompleteCodeSubmission(ctx, domain.CodeSubmission{
@@ -522,13 +538,18 @@ func (s *CodeSubmissionService) retryOrFail(ctx context.Context, tx repository.R
 		if !updated {
 			return apperror.New(apperror.ExecutionResultMismatch, "attempt changed during completion", http.StatusConflict)
 		}
+		*transition = finalTransition(current, verdict)
 		return nil
 	}
 	version, err := tx.GetTaskVersion(ctx, current.TaskID, current.TaskVersionID)
 	if err != nil {
 		return fmt.Errorf("get retry task version: %w", err)
 	}
-	return s.requeue(ctx, tx, current, version, at)
+	if err := s.requeue(ctx, tx, current, version, at); err != nil {
+		return err
+	}
+	transition.attempt = observability.RetryAttempt
+	return nil
 }
 
 // executionLimits строит sandbox-совместимые лимиты с учётом допустимых границ песочницы.

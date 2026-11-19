@@ -49,7 +49,8 @@ func (r *Postgres) ClaimOutboxMessages(ctx context.Context, limit int, claimToke
         FROM due
         WHERE o.id = due.id
         RETURNING o.id, o.aggregate_id, o.topic, o.message_key, o.payload::text,
-                  o.attempts, o.claim_token, o.claimed_until, o.available_at, o.created_at`,
+                  o.attempts, o.claim_token, o.claimed_until, o.available_at, o.created_at,
+                  (SELECT correlation_id FROM code_submissions WHERE id = o.aggregate_id)`,
 		limit,
 		claimToken,
 		claimedUntil,
@@ -73,6 +74,7 @@ func (r *Postgres) ClaimOutboxMessages(ctx context.Context, limit int, claimToke
 			&message.ClaimedUntil,
 			&message.AvailableAt,
 			&message.CreatedAt,
+			&message.CorrelationID,
 		); err != nil {
 			return nil, fmt.Errorf("scan claimed outbox message: %w", err)
 		}

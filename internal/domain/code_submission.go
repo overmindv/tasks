@@ -124,16 +124,17 @@ type CodeSubmissionFilter struct {
 
 // OutboxMessage хранит подготовленное Kafka-событие до подтверждённой публикации.
 type OutboxMessage struct {
-	ID           uuid.UUID
-	AggregateID  uuid.UUID
-	Topic        string
-	MessageKey   string
-	Payload      []byte
-	Attempts     int
-	ClaimToken   *uuid.UUID
-	ClaimedUntil *time.Time
-	AvailableAt  time.Time
-	CreatedAt    time.Time
+	ID            uuid.UUID
+	AggregateID   uuid.UUID
+	CorrelationID uuid.UUID
+	Topic         string
+	MessageKey    string
+	Payload       []byte
+	Attempts      int
+	ClaimToken    *uuid.UUID
+	ClaimedUntil  *time.Time
+	AvailableAt   time.Time
+	CreatedAt     time.Time
 }
 
 // ExecutionInboxRecord хранит идентификаторы обработанного или отклонённого Kafka-сообщения.

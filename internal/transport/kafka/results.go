@@ -178,7 +178,7 @@ func processResult(ctx context.Context, record *kgo.Record, handler resultHandle
 				attemptID = &parsed
 			}
 			if rejectErr := handler.RejectResult(ctx, metadata, attemptID, execution.InboxErrorInvalidEvent); rejectErr != nil {
-				return fmt.Errorf("persist mismatched execution result after %v: %w", err, rejectErr)
+				return fmt.Errorf("persist mismatched execution result: %w", rejectErr)
 			}
 			// Идентификаторы отвергнутого envelope не доверенные: логируем только координаты Kafka.
 			logger.WarnContext(ctx, "Kafka result event не соответствует запуску",
@@ -192,13 +192,14 @@ func processResult(ctx context.Context, record *kgo.Record, handler resultHandle
 
 		return fmt.Errorf("handle execution result: %w", err)
 	}
-	logger.InfoContext(ctx, "Kafka result event обработан",
-		"submission_id", result.SubmissionID,
-		"attempt_id", result.AttemptID,
-		"topic", record.Topic,
-		"partition", record.Partition,
-		"offset", record.Offset,
-	)
+	if correlation, err := uuid.Parse(result.TraceID); err == nil && correlation != uuid.Nil {
+		logger.InfoContext(ctx, "Kafka result event обработан",
+			"correlation_id", correlation,
+			"topic", record.Topic,
+			"partition", record.Partition,
+			"offset", record.Offset,
+		)
+	}
 
 	return nil
 }
