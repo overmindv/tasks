@@ -34,6 +34,7 @@ type CodeExecutionPolicy struct {
 	MaxPendingTotal       int
 	AdmissionRetrySeconds int
 	RequestsTopic         string
+	LearningOutcomes      bool
 	TimeLimit             time.Duration
 	MemoryLimitBytes      int64
 
@@ -382,6 +383,9 @@ func (s *CodeSubmissionService) HandleRunResult(ctx context.Context, metadata Ex
 			// Конкурентное завершение другим обработчиком: результат устарел.
 			// Permanent error — иначе consumer бесконечно ретраит poison-сообщение.
 			return apperror.New(apperror.ExecutionResultMismatch, "запуск завершён конкурирующим обработчиком", http.StatusConflict)
+		}
+		if s.policy.LearningOutcomes && current.RunMode == domain.RunModeGraded && verdict.IsLearningOutcome() {
+			return recordLearningOutcome(ctx, tx, version, current.UserID, current.ID, verdict, &current.CorrelationID)
 		}
 
 		return nil

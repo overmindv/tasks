@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/overmindv/tasks/internal/domain"
-	"github.com/overmindv/tasks/internal/repository"
 )
 
 const (
@@ -16,16 +15,22 @@ const (
 	outboxClaimTTL  = 30 * time.Second
 )
 
-// OutboxDispatcher доставляет сохранённые request events в Kafka at-least-once.
+type outboxStore interface {
+	ClaimOutboxMessages(context.Context, int, uuid.UUID, time.Time) ([]domain.OutboxMessage, error)
+	MarkOutboxPublished(context.Context, uuid.UUID, uuid.UUID) error
+	ReleaseOutboxMessage(context.Context, uuid.UUID, uuid.UUID, time.Time, string) error
+}
+
+// OutboxDispatcher доставляет сохраненные события в Kafka at-least-once.
 type OutboxDispatcher struct {
-	repository   repository.Repository
+	repository   outboxStore
 	publisher    Publisher
 	pollInterval time.Duration
 	logger       *slog.Logger
 }
 
 // NewOutboxDispatcher создаёт dispatcher с ограниченной частотой polling.
-func NewOutboxDispatcher(store repository.Repository, publisher Publisher, pollInterval time.Duration, logger *slog.Logger) *OutboxDispatcher {
+func NewOutboxDispatcher(store outboxStore, publisher Publisher, pollInterval time.Duration, logger *slog.Logger) *OutboxDispatcher {
 	return &OutboxDispatcher{
 		repository:   store,
 		publisher:    publisher,
@@ -84,7 +89,7 @@ func (d *OutboxDispatcher) publishOne(ctx context.Context, claimToken uuid.UUID,
 		if err := d.repository.MarkOutboxPublished(ctx, message.ID, claimToken); err != nil {
 			return fmt.Errorf("confirm published outbox message %s: %w", message.ID, err)
 		}
-		d.logger.InfoContext(ctx, "Kafka request event опубликован",
+		d.logger.InfoContext(ctx, "Kafka event опубликован",
 			"event_id", message.ID,
 			"submission_id", message.AggregateID,
 			"topic", message.Topic,
@@ -96,7 +101,7 @@ func (d *OutboxDispatcher) publishOne(ctx context.Context, claimToken uuid.UUID,
 	if releaseErr := d.repository.ReleaseOutboxMessage(ctx, message.ID, claimToken, retryAt, err.Error()); releaseErr != nil {
 		return fmt.Errorf("release failed outbox message %s after %v: %w", message.ID, err, releaseErr)
 	}
-	d.logger.WarnContext(ctx, "публикация Kafka request event отложена",
+	d.logger.WarnContext(ctx, "публикация Kafka event отложена",
 		"event_id", message.ID,
 		"submission_id", message.AggregateID,
 		"topic", message.Topic,

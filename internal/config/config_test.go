@@ -70,3 +70,25 @@ func TestAdmissionConfigBounds(t *testing.T) {
 		t.Fatalf("policy not loaded: %v", err)
 	}
 }
+
+func TestLearningOutcomeConfig(t *testing.T) {
+	t.Setenv("TASK_HUNTER_INGEST_TOKEN", "test")
+	t.Setenv("TASKS_LEARNING_OUTCOMES_ENABLED", "")
+	cfg, err := Load()
+	if err != nil || cfg.LearningOutcomes {
+		t.Fatal("learning outcomes must be disabled by default:", err)
+	}
+	t.Setenv("TASKS_LEARNING_OUTCOMES_ENABLED", "yes")
+	if _, err := Load(); err == nil {
+		t.Fatal("invalid learning outcome setting accepted")
+	}
+	t.Setenv("TASKS_LEARNING_OUTCOMES_ENABLED", "true")
+	cfg, err = Load()
+	if err != nil || !cfg.LearningOutcomes {
+		t.Fatal("learning outcome setting not loaded:", err)
+	}
+	t.Setenv("KAFKA_RESULTS_TOPIC", "learning.outcome.v1")
+	if _, err := Load(); err == nil {
+		t.Fatal("learning topic accepted as the execution result topic")
+	}
+}

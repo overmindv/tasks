@@ -2,7 +2,7 @@ LOCAL_BIN := $(CURDIR)/bin
 JET := $(LOCAL_BIN)/jet
 GOLANGCI_LINT := $(LOCAL_BIN)/golangci-lint
 DATABASE_URL ?= postgres://postgres:postgres@localhost:5432/tasks?sslmode=disable
-COMPONENT_TEST_DSN ?= $(DATABASE_URL)
+COMPONENT_TEST_DSN ?=
 
 # Автоматически подхватываем локальный .env (KEY=value), чтобы не выполнять
 # "set -a && source .env && set +a" вручную перед каждым таргетом.
@@ -34,6 +34,7 @@ test:
 # ctest — component-тесты: применяет миграции к ВЫДЕЛЕННОЙ тестовой БД
 # и гоняет полный HTTP-сценарий. Не направляйте на общую/production database.
 ctest:
+	@test -n "$(COMPONENT_TEST_DSN)" || (echo "Set COMPONENT_TEST_DSN to a dedicated _test database"; exit 1)
 	go run ./cmd/tasks migrate --dir migrations --dsn "$(COMPONENT_TEST_DSN)" up
 	COMPONENT_TEST_DSN="$(COMPONENT_TEST_DSN)" go test -count=1 -tags=component ./tests/component/...
 
