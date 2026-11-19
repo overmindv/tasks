@@ -88,6 +88,9 @@ func (s *TaskService) Update(ctx context.Context, taskID uuid.UUID, input domain
 		if err != nil {
 			return fmt.Errorf("get current task version: %w", err)
 		}
+		if input.EstimatedMinutes == nil && !input.SetEstimatedMinutes {
+			input.EstimatedMinutes = current.EstimatedMinutes
+		}
 		// Обычная admin-форма пока редактирует только общие поля задачи. Сохраняем
 		// programming-содержимое, которое она не передаёт, чтобы новая версия не теряла данные.
 		if input.TaskType == domain.TaskTypeProgramming {
@@ -235,20 +238,21 @@ func buildVersion(taskID, versionID uuid.UUID, number int, input domain.TaskInpu
 	}
 
 	return domain.TaskVersion{
-		ID:            versionID,
-		TaskID:        taskID,
-		VersionNumber: number,
-		TopicID:       input.TopicID,
-		Title:         input.Title,
-		Statement:     input.Statement,
-		TaskType:      input.TaskType,
-		Difficulty:    input.Difficulty,
-		CreatedBy:     actorID,
-		Options:       options,
-		Tags:          input.Tags,
-		Examples:      input.Examples,
-		Constraints:   input.Constraints,
-		Source:        input.Source,
+		ID:               versionID,
+		TaskID:           taskID,
+		VersionNumber:    number,
+		TopicID:          input.TopicID,
+		Title:            input.Title,
+		Statement:        input.Statement,
+		TaskType:         input.TaskType,
+		Difficulty:       input.Difficulty,
+		EstimatedMinutes: input.EstimatedMinutes,
+		CreatedBy:        actorID,
+		Options:          options,
+		Tags:             input.Tags,
+		Examples:         input.Examples,
+		Constraints:      input.Constraints,
+		Source:           input.Source,
 	}
 }
 

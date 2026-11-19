@@ -38,6 +38,7 @@ type Config struct {
 	AdmissionMaxTotal       int
 	AdmissionRetrySeconds   int
 	TaskHunterIngestToken   string
+	ResourceToken           string
 	KafkaBrokers            []string
 	KafkaRequestsTopic      string
 	KafkaResultsTopic       string
@@ -120,6 +121,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		AdmissionMaxPerUser: maxUser, AdmissionMaxTotal: maxTotal, AdmissionRetrySeconds: retrySeconds,
 		TaskHunterIngestToken:   strings.TrimSpace(os.Getenv("TASK_HUNTER_INGEST_TOKEN")),
+		ResourceToken:           os.Getenv("TASKS_RESOURCE_TOKEN"),
 		KafkaBrokers:            envList("KAFKA_BOOTSTRAP_SERVERS", defaultKafkaBroker),
 		KafkaRequestsTopic:      env("KAFKA_REQUESTS_TOPIC", defaultRequestTopic),
 		KafkaResultsTopic:       env("KAFKA_RESULTS_TOPIC", defaultResultTopic),

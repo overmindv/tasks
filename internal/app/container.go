@@ -52,6 +52,10 @@ func Build(app *parker.App) error {
 	if cfg.LearningOutcomes {
 		submissionService = usecase.NewSubmissionServiceWithOutcomes(store)
 	}
+	languageVersions := map[domain.ProgrammingLanguage]string{
+		domain.ProgrammingLanguagePython: cfg.PythonVersion,
+		domain.ProgrammingLanguageGo:     cfg.GoVersion,
+	}
 	codeSubmissionService := usecase.NewCodeSubmissionService(store, usecase.CodeExecutionPolicy{
 		MaxPendingPerUser: cfg.AdmissionMaxPerUser, MaxPendingTotal: cfg.AdmissionMaxTotal, AdmissionRetrySeconds: cfg.AdmissionRetrySeconds,
 		RequestsTopic:    cfg.KafkaRequestsTopic,
@@ -64,10 +68,7 @@ func Build(app *parker.App) error {
 		StdoutBytes:      cfg.ExecutionStdoutBytes,
 		StderrBytes:      cfg.ExecutionStderrBytes,
 		WorkspaceBytes:   cfg.ExecutionWorkspaceBytes,
-		LanguageVersions: map[domain.ProgrammingLanguage]string{
-			domain.ProgrammingLanguagePython: cfg.PythonVersion,
-			domain.ProgrammingLanguageGo:     cfg.GoVersion,
-		},
+		LanguageVersions: languageVersions,
 	})
 	candidateService := usecase.NewCandidateService(store)
 	progressService := usecase.NewProgressService(store)
@@ -84,6 +85,9 @@ func Build(app *parker.App) error {
 		cfg.TaskHunterIngestToken,
 	)
 	httpapi.RegisterProgress(app.HTTP(), progressService, app.Logger())
+	if err := httpapi.RegisterResources(app.HTTP(), usecase.NewResourceService(store, languageVersions), cfg.ResourceToken, app.Logger()); err != nil {
+		return err
+	}
 	var suiteObjects usecase.SuiteObjectStore
 	if os.Getenv("TASKS_SUITE_S3_ENDPOINT") != "" || os.Getenv("TASKS_SUITE_S3_BUCKET") != "" || os.Getenv("TASKS_SUITE_S3_ACCESS_KEY_ID") != "" || os.Getenv("TASKS_SUITE_S3_SECRET_ACCESS_KEY") != "" {
 		suiteObjects, err = suitestore.New(suitestore.Config{Endpoint: os.Getenv("TASKS_SUITE_S3_ENDPOINT"), Region: os.Getenv("TASKS_SUITE_S3_REGION"), Bucket: os.Getenv("TASKS_SUITE_S3_BUCKET"), AccessKey: os.Getenv("TASKS_SUITE_S3_ACCESS_KEY_ID"), SecretKey: os.Getenv("TASKS_SUITE_S3_SECRET_ACCESS_KEY"), Prefix: os.Getenv("TASKS_SUITE_S3_PREFIX")})
@@ -91,7 +95,7 @@ func Build(app *parker.App) error {
 			return err
 		}
 	}
-	httpapi.RegisterSuites(app.HTTP(), usecase.NewSuiteService(store, suiteObjects, map[domain.ProgrammingLanguage]string{domain.ProgrammingLanguagePython: cfg.PythonVersion, domain.ProgrammingLanguageGo: cfg.GoVersion}), app.Logger())
+	httpapi.RegisterSuites(app.HTTP(), usecase.NewSuiteService(store, suiteObjects, languageVersions), app.Logger())
 
 	dispatcher := kafkaadapter.NewOutboxDispatcher(store, producer, cfg.OutboxPollInterval, app.Logger())
 	consumer := kafkaadapter.NewResultConsumer(consumerClient, codeSubmissionService, app.Logger())

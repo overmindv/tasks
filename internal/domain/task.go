@@ -10,14 +10,15 @@ import (
 )
 
 const (
-	MaxOptions         = 20
-	MaxTitleLength     = 200
-	MaxStatementLength = 50000
-	MaxOptionLength    = 2000
-	MaxTags            = 50
-	MaxTagLength       = 100
-	MaxExamples        = 20
-	MaxConstraints     = 50
+	MaxOptions          = 20
+	MaxTitleLength      = 200
+	MaxStatementLength  = 50000
+	MaxOptionLength     = 2000
+	MaxTags             = 50
+	MaxTagLength        = 100
+	MaxExamples         = 20
+	MaxConstraints      = 50
+	MaxEstimatedMinutes = 1440
 )
 
 // TaskStatus описывает lifecycle тестовой задачи.
@@ -69,22 +70,23 @@ type Task struct {
 
 // TaskVersion хранит неизменяемое содержимое конкретной версии теста.
 type TaskVersion struct {
-	ID            uuid.UUID
-	TaskID        uuid.UUID
-	VersionNumber int
-	TopicID       *uuid.UUID
-	Title         string
-	Statement     string
-	TaskType      TaskType
-	Difficulty    Difficulty
-	CreatedBy     uuid.UUID
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	Options       []TaskOption
-	Tags          []string
-	Examples      []TaskExample
-	Constraints   []string
-	Source        *TaskSource
+	ID               uuid.UUID
+	TaskID           uuid.UUID
+	VersionNumber    int
+	TopicID          *uuid.UUID
+	Title            string
+	Statement        string
+	TaskType         TaskType
+	Difficulty       Difficulty
+	EstimatedMinutes *int
+	CreatedBy        uuid.UUID
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	Options          []TaskOption
+	Tags             []string
+	Examples         []TaskExample
+	Constraints      []string
+	Source           *TaskSource
 }
 
 // TaskExample хранит открытый пример входных и выходных данных.
@@ -121,16 +123,18 @@ type TaskDetail struct {
 
 // TaskInput описывает полную запись новой версии теста.
 type TaskInput struct {
-	TopicID     *uuid.UUID
-	Title       string
-	Statement   string
-	TaskType    TaskType
-	Difficulty  Difficulty
-	Options     []OptionInput
-	Tags        []string
-	Examples    []TaskExample
-	Constraints []string
-	Source      *TaskSource
+	EstimatedMinutes    *int
+	SetEstimatedMinutes bool
+	TopicID             *uuid.UUID
+	Title               string
+	Statement           string
+	TaskType            TaskType
+	Difficulty          Difficulty
+	Options             []OptionInput
+	Tags                []string
+	Examples            []TaskExample
+	Constraints         []string
+	Source              *TaskSource
 }
 
 // OptionInput описывает вариант ответа до сохранения.
@@ -193,6 +197,9 @@ func ValidateTaskInput(input TaskInput) error {
 	}
 	if input.Difficulty != DifficultyEasy && input.Difficulty != DifficultyMedium && input.Difficulty != DifficultyHard {
 		return fmt.Errorf("неподдерживаемая difficulty %q", input.Difficulty)
+	}
+	if input.EstimatedMinutes != nil && (*input.EstimatedMinutes < 1 || *input.EstimatedMinutes > MaxEstimatedMinutes) {
+		return fmt.Errorf("estimated_minutes должен быть от 1 до %d", MaxEstimatedMinutes)
 	}
 	if input.TaskType == TaskTypeProgramming {
 		if len(input.Options) != 0 {
