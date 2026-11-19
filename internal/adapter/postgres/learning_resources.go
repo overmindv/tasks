@@ -96,12 +96,20 @@ func resourceRuntime(language, version *string) *domain.ResourceRuntime {
 }
 
 func (r *Postgres) AvailableResourceVersions(ctx context.Context, keys []domain.ResourceKey) ([]domain.ResourceAvailability, error) {
+	return r.availableResourceVersions(ctx, keys, uuid.Nil)
+}
+
+func (r *Postgres) DiagnosticResourceVersions(ctx context.Context, learner uuid.UUID, keys []domain.ResourceKey) ([]domain.ResourceAvailability, error) {
+	return r.availableResourceVersions(ctx, keys, learner)
+}
+
+func (r *Postgres) availableResourceVersions(ctx context.Context, keys []domain.ResourceKey, learner uuid.UUID) ([]domain.ResourceAvailability, error) {
 	taskIDs := make([]uuid.UUID, len(keys))
 	versionIDs := make([]uuid.UUID, len(keys))
 	for i, key := range keys {
 		taskIDs[i], versionIDs[i] = key.TaskID, key.VersionID
 	}
-	const query = `
+	query := `
 		SELECT t.id, t.current_version_id, c.language_id, c.language_version
 		FROM unnest($1::uuid[], $2::uuid[]) AS wanted(task_id, version_id)
 		JOIN tasks AS t ON t.id = wanted.task_id AND t.current_version_id = wanted.version_id
@@ -110,7 +118,28 @@ func (r *Postgres) AvailableResourceVersions(ctx context.Context, keys []domain.
 			WHERE task_id = t.id ORDER BY revision DESC LIMIT 1
 		) AS c ON c.task_version_id = t.current_version_id
 		WHERE t.status = 'published' AND t.deleted_at IS NULL`
-	rows, err := r.query.Query(ctx, query, taskIDs, versionIDs)
+	args := []any{taskIDs, versionIDs}
+	if learner != uuid.Nil {
+		// Новая версия не делает уже знакомую задачу независимой проверкой.
+		// Порядок попыток совпадает с индексами, чтобы не читать историю целиком.
+		query += `
+		  AND t.created_by <> $3
+		  AND (
+		      SELECT 1 FROM task_versions AS v
+		      WHERE v.task_id = t.id AND v.created_by = $3
+		      LIMIT 1
+		  ) IS NULL
+		  AND (
+		      SELECT 1 FROM submissions AS s WHERE s.user_id = $3 AND s.task_id = t.id
+		      ORDER BY s.created_at DESC, s.id DESC LIMIT 1
+		  ) IS NULL
+		  AND (
+		      SELECT 1 FROM code_submissions AS s WHERE s.user_id = $3 AND s.task_id = t.id
+		      ORDER BY s.created_at DESC, s.id DESC LIMIT 1
+		  ) IS NULL`
+		args = append(args, learner)
+	}
+	rows, err := r.query.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("check resource versions: %w", err)
 	}

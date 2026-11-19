@@ -11,11 +11,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	postgresadapter "github.com/overmindv/tasks/internal/adapter/postgres"
@@ -248,7 +251,160 @@ func TestTaskLearningResourceCommitOrder(t *testing.T) {
 	}
 }
 
-func resourceTestPool(t *testing.T) *pgxpool.Pool {
+func TestTaskDiagnosticEligibility(t *testing.T) {
+	ctx := t.Context()
+	store := postgresadapter.New(resourceTestPool(t))
+	tasks := usecase.NewTaskService(store)
+	author, learner, peer, topic := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	input := domain.TaskInput{TopicID: &topic, Title: "Choice for diagnosis", Statement: "Choose an answer",
+		TaskType: domain.TaskTypeSingleChoice,
+		Options:  []domain.OptionInput{{Text: "Wrong"}, {Text: "Correct", IsCorrect: true}}}
+	clean := createResourceTask(t, tasks, input, author, true)
+	seen := createResourceTask(t, tasks, input, author, true)
+	draft := createResourceTask(t, tasks, input, author, false)
+	own := createResourceTask(t, tasks, input, learner, true)
+	edited := createResourceTask(t, tasks, input, author, true)
+	if _, err := tasks.Update(ctx, edited.Task.ID, input, learner); err != nil {
+		t.Fatal(err)
+	}
+	edited, err := tasks.Update(ctx, edited.Task.ID, input, author)
+	if err != nil {
+		t.Fatal(err)
+	}
+	choice := usecase.NewSubmissionService(store)
+	attempt, err := choice.Submit(ctx, seen.Task.ID, learner, usecase.SubmitInput{
+		TaskVersionID: seen.Version.ID, IdempotencyKey: uuid.New(), SelectedOptionIDs: []uuid.UUID{seen.Version.Options[0].ID},
+	})
+	if err != nil || len(attempt.CorrectOptionIDs) == 0 {
+		t.Fatal("expected a recorded choice attempt with the answer:", err)
+	}
+	next, err := tasks.Update(ctx, seen.Task.ID, input, author)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	program := createResourceTask(t, tasks, domain.TaskInput{TopicID: &topic, Title: "Code for diagnosis",
+		Statement: "Echo", TaskType: domain.TaskTypeProgramming,
+		Examples: []domain.TaskExample{{Input: "hello", Output: "hello"}}}, author, true)
+	codes := usecase.NewCodeSubmissionService(store, usecase.CodeExecutionPolicy{
+		RequestsTopic: "requests", RetryGrace: time.Minute, TimeLimit: time.Second, MemoryLimitBytes: 64 << 20,
+	})
+	if _, err := codes.Submit(ctx, program.Task.ID, learner, usecase.CodeSubmissionInput{
+		TaskVersionID: program.Version.ID, IdempotencyKey: uuid.New(), Language: "python", SourceCode: "print(input())",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runtimes := map[domain.ProgrammingLanguage]string{domain.ProgrammingLanguagePython: "3.12"}
+	suites := usecase.NewSuiteService(store, &suiteObjectStore{objects: make(map[string][]byte)}, runtimes)
+	suite, err := suites.Create(ctx, program.Task.ID, program.Version.ID, suiteDefinition())
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := suites.Publish(ctx, suite.ID, suite.Revision, author)
+	if err != nil {
+		t.Fatal(err)
+	}
+	program.Version.ID = published.TaskVersionID
+
+	handler := resourceTestHandler(t, store, runtimes)
+	keys := []availableResourceKey{{seen.Task.ID, seen.Version.ID}, {next.Task.ID, next.Version.ID},
+		{own.Task.ID, own.Version.ID}, {edited.Task.ID, edited.Version.ID},
+		{draft.Task.ID, draft.Version.ID}, {clean.Task.ID, clean.Version.ID}, {program.Task.ID, program.Version.ID}}
+	inputJSON, err := json.Marshal(map[string][]availableResourceKey{"resources": keys})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(actor uuid.UUID, raw []byte, wantStatus int, want ...availableResourceKey) {
+		t.Helper()
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/internal/resources/diagnostic-eligibility", bytes.NewReader(raw))
+		req.Header.Set("Authorization", "Bearer "+strings.Repeat("x", 32))
+		req.Header.Set("X-User-ID", actor.String())
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != wantStatus {
+			t.Fatal("unexpected eligibility status:", res.Code, res.Body.String())
+		}
+		if wantStatus == http.StatusOK {
+			var got struct {
+				Resources []availableResourceKey `json:"resources"`
+			}
+			decoder := json.NewDecoder(res.Body)
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&got); err != nil || got.Resources == nil || !slices.Equal(got.Resources, want) {
+				t.Fatal("incorrect eligible keys:", got.Resources, "want:", want, err)
+			}
+		}
+	}
+	check(learner, inputJSON, http.StatusOK, keys[5])
+	check(peer, inputJSON, http.StatusOK, keys[1], keys[2], keys[3], keys[5], keys[6])
+	check(learner, []byte(`{"resources":[{"task_id":"`+own.Task.ID.String()+`","task_version_id":"`+own.Version.ID.String()+`"}]}`), http.StatusOK)
+	check(learner, []byte(`{"resources":[]}`), http.StatusBadRequest)
+	for _, count := range []int{2, 101} {
+		raw, err := json.Marshal(map[string][]availableResourceKey{"resources": slices.Repeat(keys[:1], count)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(learner, raw, http.StatusBadRequest)
+	}
+}
+
+func BenchmarkDiagnosticEligibility(b *testing.B) {
+	ctx := b.Context()
+	pool := resourceTestPool(b)
+	if !strings.HasSuffix(pool.Config().ConnConfig.Database, "_test") {
+		b.Skip("benchmark requires a dedicated database ending in _test")
+	}
+	store := postgresadapter.New(pool)
+	tasks := usecase.NewTaskService(store)
+	author, learner, topic := uuid.New(), uuid.New(), uuid.New()
+	input := domain.TaskInput{TopicID: &topic, Title: "Choice for diagnosis", Statement: "Choose an answer",
+		TaskType: domain.TaskTypeSingleChoice,
+		Options:  []domain.OptionInput{{Text: "Wrong"}, {Text: "Correct", IsCorrect: true}}}
+	keys := make([]domain.ResourceKey, 100)
+	for i := range keys {
+		task := createResourceTask(b, tasks, input, author, true)
+		keys[i] = domain.ResourceKey{TaskID: task.Task.ID, VersionID: task.Version.ID}
+	}
+	const history = `
+		INSERT INTO submissions (user_id, task_id, task_version_id, idempotency_key, request_hash, verdict)
+		VALUES ($1, $2, $3, gen_random_uuid(), 'bench', 'wrong_answer')`
+	batch := &pgx.Batch{}
+	for _, key := range keys[:50] {
+		batch.Queue(history, learner, key.TaskID, key.VersionID)
+	}
+	if err := pool.SendBatch(ctx, batch).Close(); err != nil {
+		b.Fatal(err)
+	}
+	otherTask := createResourceTask(b, tasks, input, author, true)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO submissions (user_id, task_id, task_version_id, idempotency_key, request_hash, verdict)
+		SELECT $1, $2, $3, gen_random_uuid(), 'bench', 'wrong_answer'
+		FROM generate_series(1, 100000)`, learner, otherTask.Task.ID, otherTask.Version.ID); err != nil {
+		b.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "ANALYZE submissions"); err != nil {
+		b.Fatal(err)
+	}
+	service := usecase.NewResourceService(store, nil)
+	b.Run("availability", func(b *testing.B) {
+		for b.Loop() {
+			got, err := service.Available(b.Context(), keys)
+			if err != nil || len(got) != 100 {
+				b.Fatal("expected 100 available tasks:", len(got), err)
+			}
+		}
+	})
+	b.Run("diagnostic", func(b *testing.B) {
+		for b.Loop() {
+			got, err := service.DiagnosticEligible(b.Context(), learner, keys)
+			if err != nil || len(got) != 50 {
+				b.Fatal("expected 50 unseen tasks:", len(got), err)
+			}
+		}
+	})
+}
+
+func resourceTestPool(t testing.TB) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("COMPONENT_TEST_DSN")
 	if dsn == "" {
@@ -262,7 +418,7 @@ func resourceTestPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-func createResourceTask(t *testing.T, svc *usecase.TaskService, input domain.TaskInput, actor uuid.UUID, publish bool) domain.TaskDetail {
+func createResourceTask(t testing.TB, svc *usecase.TaskService, input domain.TaskInput, actor uuid.UUID, publish bool) domain.TaskDetail {
 	t.Helper()
 	task, err := svc.Create(t.Context(), input, actor)
 	if err != nil {
