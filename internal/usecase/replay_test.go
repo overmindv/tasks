@@ -12,6 +12,8 @@ import (
 )
 
 func TestReplayRequiresAdminAndRotatesAttempt(t *testing.T) {
+	t.Parallel()
+
 	repo, svc, first := fencingSubmission(t)
 	if _, err := svc.Replay(context.Background(), first.ID, first.ExecutionID, uuid.New(), false); err == nil {
 		t.Fatal("non-admin replay")
@@ -33,8 +35,8 @@ func TestReplayRequiresAdminAndRotatesAttempt(t *testing.T) {
 	if _, err = svc.Replay(context.Background(), first.ID, first.ExecutionID, uuid.New(), true); err == nil {
 		t.Fatal("duplicate replay")
 	}
-	if err := svc.HandleRunResult(context.Background(), fencingMeta(99), fencingResult(first, "ok")); err != nil {
-		t.Fatal(err)
+	if handleErr := svc.HandleRunResult(context.Background(), fencingMeta(99), fencingResult(first, "ok")); handleErr != nil {
+		t.Fatal(handleErr)
 	}
 	if repo.submissions[first.ID].Status != domain.CodeSubmissionStatusQueued {
 		t.Fatal("late result changed replay")
@@ -63,10 +65,13 @@ func (r *codeSubmissionMemoryRepository) ReplayCodeSubmission(_ context.Context,
 	s.Verdict = nil
 	s.NextAttemptAt = deadline
 	r.submissions[id] = s
+
 	return true, nil
 }
 
 func TestReplayRejectsStudentVerdicts(t *testing.T) {
+	t.Parallel()
+
 	for _, verdict := range []domain.ExecutionVerdict{domain.ExecutionVerdictAccepted, domain.ExecutionVerdictWrongAnswer} {
 		repo, svc, first := fencingSubmission(t)
 		first.Status = domain.CodeSubmissionStatusCompleted

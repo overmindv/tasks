@@ -11,6 +11,8 @@ import (
 )
 
 func TestResultIntegrity(t *testing.T) {
+	t.Parallel()
+
 	expected := []domain.TaskExample{{Input: "a", Output: "1"}, {Input: "b", Output: "2"}}
 	tests := []struct {
 		name   string
@@ -35,6 +37,8 @@ func TestResultIntegrity(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			r := execution.RunResult{Status: "ok", Summary: execution.ResultSummary{CasesTotal: 2}, Cases: []execution.CaseRunResult{{Index: 0, Status: "ok", Stdout: "1"}, {Index: 1, Status: "ok", Stdout: "2"}}}
 			tt.mutate(&r)
 			got, _, _ := verdictFromRunResult(r, expected)
@@ -46,6 +50,8 @@ func TestResultIntegrity(t *testing.T) {
 }
 
 func TestRunFailureCannotMaskCaseInfrastructureError(t *testing.T) {
+	t.Parallel()
+
 	r := execution.RunResult{Status: "runtime_error", Summary: execution.ResultSummary{CasesTotal: 1, CasesWithError: 1}, Cases: []execution.CaseRunResult{{Index: 0, Status: "internal_error"}}}
 	got, _, _ := verdictFromRunResult(r, []domain.TaskExample{{Input: "a", Output: "1"}})
 	if got != domain.ExecutionVerdictInfrastructureError {
@@ -54,8 +60,12 @@ func TestRunFailureCannotMaskCaseInfrastructureError(t *testing.T) {
 }
 
 func TestResultContextMismatchRetriesWithoutAccepting(t *testing.T) {
+	t.Parallel()
+
 	for _, kind := range []string{"missing", "version", "checksum"} {
 		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+
 			repo, svc, s := fencingSubmission(t)
 			result := fencingResult(s, "ok")
 			switch kind {
@@ -91,6 +101,8 @@ func TestResultContextMismatchRetriesWithoutAccepting(t *testing.T) {
 }
 
 func TestResultWrongUserIsRejected(t *testing.T) {
+	t.Parallel()
+
 	repo, svc, s := fencingSubmission(t)
 	r := fencingResult(s, "ok")
 	r.UserID = uuid.NewString()
@@ -102,6 +114,8 @@ func TestResultWrongUserIsRejected(t *testing.T) {
 
 // Вывод malicious fixtures sandbox не является доверенным отчётом checker.
 func TestSolutionOutputCannotForgeAccepted(t *testing.T) {
+	t.Parallel()
+
 	expected := []domain.TaskExample{{Input: "probe\n", Output: "TRUSTED_EXPECTED_42\n"}}
 	for _, output := range []string{"harness overwritten\n", `{"status":"passed","tests_passed":100}`, "", "expected unavailable\n"} {
 		result := execution.RunResult{Status: "ok", Summary: execution.ResultSummary{CasesTotal: 1}, Cases: []execution.CaseRunResult{{Index: 0, Status: "ok", Stdout: output}}}
