@@ -97,6 +97,7 @@ func NewCodeSubmissionService(store repository.Repository, policy CodeExecutionP
 	if policy.RetryGrace <= 0 {
 		policy.RetryGrace = 2 * time.Minute
 	}
+
 	return &CodeSubmissionService{
 		repository: store,
 		policy:     policy,
@@ -137,31 +138,32 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 	var submission domain.CodeSubmission
 	created := false
 	err = s.repository.WithinTransaction(ctx, func(tx repository.Repository) error {
-		own, total, err := tx.CodeAdmissionUsage(ctx, userID)
-		if err != nil {
-			return fmt.Errorf("lock submission admission: %w", err)
+		own, total, usageErr := tx.CodeAdmissionUsage(ctx, userID)
+		if usageErr != nil {
+			return fmt.Errorf("lock submission admission: %w", usageErr)
 		}
-		existing, err := tx.FindCodeSubmissionByIdempotency(ctx, userID, input.IdempotencyKey)
-		if err != nil {
-			return err
+		transactionExisting, findErr := tx.FindCodeSubmissionByIdempotency(ctx, userID, input.IdempotencyKey)
+		if findErr != nil {
+			return findErr
 		}
-		if existing != nil {
-			submission, err = sameModeSubmission(*existing, hash, legacyCodeRequestHash(taskID, input), input.RunMode)
+		if transactionExisting != nil {
+			submission, err = sameModeSubmission(*transactionExisting, hash, legacyCodeRequestHash(taskID, input), input.RunMode)
+
 			return err
 		}
 		if own >= s.policy.MaxPendingPerUser || total >= s.policy.MaxPendingTotal {
 			return &apperror.Error{Code: apperror.RateLimited, Message: "submission capacity unavailable", Status: http.StatusTooManyRequests, RetryAfterSeconds: s.policy.AdmissionRetrySeconds}
 		}
-		task, err := tx.GetTask(ctx, taskID, true)
-		if err != nil {
-			return fmt.Errorf("get task for code submission: %w", err)
+		task, taskErr := tx.GetTask(ctx, taskID, true)
+		if taskErr != nil {
+			return fmt.Errorf("get task for code submission: %w", taskErr)
 		}
 		if task.Status != domain.TaskStatusPublished {
 			return apperror.New(apperror.TaskNotAvailable, "задача недоступна для решения", http.StatusConflict)
 		}
-		version, err := tx.GetTaskVersion(ctx, taskID, input.TaskVersionID)
-		if err != nil {
-			return fmt.Errorf("get submitted programming task version: %w", err)
+		version, versionErr := tx.GetTaskVersion(ctx, taskID, input.TaskVersionID)
+		if versionErr != nil {
+			return fmt.Errorf("get submitted programming task version: %w", versionErr)
 		}
 		if version.TaskType != domain.TaskTypeProgramming {
 			return apperror.New(apperror.TaskTypeNotSubmittable, "загрузка файла доступна только для programming-задач", http.StatusConflict)
@@ -170,9 +172,9 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 		if input.RunMode == domain.RunModeSamples && len(open) == 0 {
 			return apperror.New(apperror.TaskNotExecutable, "у задачи нет открытых примеров с ожидаемым результатом", http.StatusConflict)
 		}
-		suite, err := executionSuite(ctx, tx, taskID, version.ID, input.RunMode, input.Language)
-		if err != nil {
-			return err
+		suite, suiteErr := executionSuite(ctx, tx, taskID, version.ID, input.RunMode, input.Language)
+		if suiteErr != nil {
+			return suiteErr
 		}
 		now := time.Now().UTC()
 		submission = domain.CodeSubmission{
@@ -198,14 +200,14 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 		}
 		request := s.buildRunRequest(submission, open, now)
 		applyExecutionSuite(&request, suite)
-		payload, err := execution.EncodeRunRequest(request)
-		if err != nil {
-			return fmt.Errorf("encode execution request: %w", err)
+		payload, encodeErr := execution.EncodeRunRequest(request)
+		if encodeErr != nil {
+			return fmt.Errorf("encode execution request: %w", encodeErr)
 		}
-		if err := tx.InsertCodeSubmission(ctx, submission); err != nil {
-			return fmt.Errorf("insert code submission: %w", err)
+		if insertErr := tx.InsertCodeSubmission(ctx, submission); insertErr != nil {
+			return fmt.Errorf("insert code submission: %w", insertErr)
 		}
-		if err := tx.InsertOutboxMessage(ctx, domain.OutboxMessage{
+		if outboxErr := tx.InsertOutboxMessage(ctx, domain.OutboxMessage{
 			ID:          uuid.New(),
 			AggregateID: submission.ID,
 			Topic:       s.policy.RequestsTopic,
@@ -213,11 +215,12 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 			Payload:     payload,
 			AvailableAt: now,
 			CreatedAt:   now,
-		}); err != nil {
-			return fmt.Errorf("insert execution request into outbox: %w", err)
+		}); outboxErr != nil {
+			return fmt.Errorf("insert execution request into outbox: %w", outboxErr)
 		}
 
 		created = true
+
 		return nil
 	})
 	if err != nil {
@@ -232,6 +235,7 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 	if created {
 		s.metrics.Attempt(observability.InitialAttempt)
 	}
+
 	return submission, nil
 }
 
@@ -293,6 +297,7 @@ func (s *CodeSubmissionService) ListMine(ctx context.Context, filter domain.Code
 	for i, item := range items {
 		safe[i] = domain.PublicCodeSubmission(item)
 	}
+
 	return safe, nil
 }
 
@@ -312,6 +317,7 @@ func (s *CodeSubmissionService) HandleRunResult(ctx context.Context, metadata Ex
 			if errors.As(err, &public) && public.Code == apperror.CodeSubmissionNotFound {
 				return apperror.New(apperror.ExecutionResultMismatch, "unknown submission", http.StatusConflict)
 			}
+
 			return fmt.Errorf("lock code submission: %w", err)
 		}
 		// Проверяем базовую принадлежность отдельно от номера текущей попытки.
@@ -346,6 +352,7 @@ func (s *CodeSubmissionService) HandleRunResult(ctx context.Context, metadata Ex
 			if errors.As(err, &public) && public.Code == apperror.TaskVersionNotFound {
 				return apperror.New(apperror.ExecutionResultMismatch, "task version not found", http.StatusConflict)
 			}
+
 			return fmt.Errorf("get result task version: %w", err)
 		}
 		expectedCases := openExamples(version.Examples)
@@ -397,12 +404,14 @@ func (s *CodeSubmissionService) HandleRunResult(ctx context.Context, metadata Ex
 		}
 
 		transition = finalTransition(current, verdict)
+
 		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("handle execution result: %w", err)
 	}
 	transition.observe(s.metrics)
+
 	return nil
 }
 
@@ -516,11 +525,13 @@ func (s *CodeSubmissionService) requeueOrFailOne(ctx context.Context, stale doma
 		if current.Status != domain.CodeSubmissionStatusQueued || current.ExecutionID != stale.ExecutionID || now.Before(current.NextAttemptAt) {
 			return nil
 		}
+
 		return s.retryOrFail(ctx, tx, current, now, &transition)
 	})
 	if err == nil {
 		transition.observe(s.metrics)
 	}
+
 	return err
 }
 
@@ -543,6 +554,7 @@ func (s *CodeSubmissionService) retryOrFail(ctx context.Context, tx repository.R
 			return apperror.New(apperror.ExecutionResultMismatch, "attempt changed during completion", http.StatusConflict)
 		}
 		*transition = finalTransition(current, verdict)
+
 		return nil
 	}
 	version, err := tx.GetTaskVersion(ctx, current.TaskID, current.TaskVersionID)
@@ -553,6 +565,7 @@ func (s *CodeSubmissionService) retryOrFail(ctx context.Context, tx repository.R
 		return err
 	}
 	transition.attempt = observability.RetryAttempt
+
 	return nil
 }
 
@@ -725,6 +738,7 @@ func expectedAt(expected []domain.TaskExample, index int) string {
 	if index >= 0 && index < len(expected) {
 		return expected[index].Output
 	}
+
 	return ""
 }
 
@@ -759,6 +773,7 @@ func codeRequestHash(taskID uuid.UUID, input CodeSubmissionInput) string {
 		mode = domain.RunModeSamples
 	}
 	sum := sha256.Sum256([]byte(string(mode) + "\x00" + legacyCodeRequestHash(taskID, input)))
+
 	return hex.EncodeToString(sum[:])
 }
 func legacyCodeRequestHash(taskID uuid.UUID, input CodeSubmissionInput) string {
@@ -867,6 +882,7 @@ func validResultCases(result execution.RunResult, expected int) bool {
 			return false
 		}
 	}
+
 	return result.Summary.CasesWithError == errors
 }
 
@@ -875,6 +891,7 @@ func sameModeSubmission(s domain.CodeSubmission, hash, legacy string, mode domai
 	if mode == domain.RunModeSamples && (s.RunMode == "" || s.RunMode == domain.RunModeSamples) && s.RequestHash == legacy {
 		return s, nil
 	}
+
 	return sameIdempotentCodeSubmission(s, hash)
 }
 func executionSuite(ctx context.Context, repo repository.Repository, taskID, versionID uuid.UUID, mode domain.RunMode, language domain.ProgrammingLanguage) (*domain.PublishedSuite, error) {
@@ -891,6 +908,7 @@ func executionSuite(ctx context.Context, repo repository.Repository, taskID, ver
 	if suite.Definition.Language != language {
 		return nil, apperror.New(apperror.ValidationError, "language not supported by suite", 400)
 	}
+
 	return suite, nil
 }
 func applyExecutionSuite(req *execution.RunRequest, suite *domain.PublishedSuite) {
@@ -909,6 +927,7 @@ func suiteExamples(suite *domain.PublishedSuite) []domain.TaskExample {
 	for i, c := range suite.Definition.Cases {
 		cases[i] = domain.TaskExample{Input: c.Input, Output: c.Output}
 	}
+
 	return cases
 }
 func verdictFromSuiteResult(result execution.RunResult, suite *domain.PublishedSuite) (domain.ExecutionVerdict, []domain.ExecutionTestResult, *domain.ExecutionFailure) {
@@ -923,5 +942,6 @@ func verdictFromSuiteResult(result execution.RunResult, suite *domain.PublishedS
 			tests[i].Stderr = ""
 		}
 	}
+
 	return verdict, tests, failure
 }

@@ -9,6 +9,7 @@ import (
 
 func (s *CodeSubmissionService) WithExecutionMetrics(metrics *observability.Execution) *CodeSubmissionService {
 	s.metrics = metrics
+
 	return s
 }
 

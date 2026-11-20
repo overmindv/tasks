@@ -13,6 +13,11 @@ import (
 	"github.com/overmindv/tasks/internal/repository"
 )
 
+const (
+	internalErrorStatus = "internal_error"
+	versionStage        = "version"
+)
+
 func fencingSubmission(t *testing.T) (*codeSubmissionMemoryRepository, *CodeSubmissionService, domain.CodeSubmission) {
 	t.Helper()
 	repo, svc, taskID, versionID := newCodeSubmissionService()
@@ -22,16 +27,18 @@ func fencingSubmission(t *testing.T) (*codeSubmissionMemoryRepository, *CodeSubm
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return repo, svc, submission
 }
 func fencingResult(s domain.CodeSubmission, status string) execution.RunResult {
 	r := execution.RunResult{SchemaVersion: execution.ResultSchemaVersion, SubmissionID: s.ID.String(), AttemptID: s.ExecutionID.String(), TaskID: s.TaskID.String(), UserID: s.UserID.String(), Status: status, CreatedAt: time.Now().UTC(), Cases: []execution.CaseRunResult{{Index: 0, Status: "ok", Stdout: "hello\n"}}}
 	r.EvaluationContext = &execution.EvaluationContext{TaskVersionID: s.TaskVersionID.String(), SuiteSHA256: execution.InputSuiteSHA256([]string{"hello"})}
 	r.Summary.CasesTotal = 1
-	if status == "internal_error" {
+	if status == internalErrorStatus {
 		r.Summary.CasesTotal = 0
 		r.Cases = nil
 	}
+
 	return r
 }
 func fencingMeta(offset int64) ExecutionMessageMetadata {
@@ -39,6 +46,8 @@ func fencingMeta(offset int64) ExecutionMessageMetadata {
 }
 
 func TestInitialAttemptHasFullDeadline(t *testing.T) {
+	t.Parallel()
+
 	_, svc, s := fencingSubmission(t)
 	if s.NextAttemptAt.Sub(s.CreatedAt) != svc.policy.RetryGrace {
 		t.Fatalf("initial attempt deadline = %s, want %s", s.NextAttemptAt.Sub(s.CreatedAt), svc.policy.RetryGrace)
@@ -46,11 +55,13 @@ func TestInitialAttemptHasFullDeadline(t *testing.T) {
 }
 
 func TestRetryRotatesAttemptAndFencesLateResult(t *testing.T) {
+	t.Parallel()
+
 	repo, svc, first := fencingSubmission(t)
 	// Старый код начинал с немедленно истёкшего срока; здесь проверяется именно retry.
 	first.NextAttemptAt = time.Now().Add(time.Minute)
 	repo.submissions[first.ID] = first
-	if err := svc.HandleRunResult(context.Background(), fencingMeta(1), fencingResult(first, "internal_error")); err != nil {
+	if err := svc.HandleRunResult(context.Background(), fencingMeta(1), fencingResult(first, internalErrorStatus)); err != nil {
 		t.Fatal(err)
 	}
 	second := repo.submissions[first.ID]
@@ -90,6 +101,8 @@ func TestRetryRotatesAttemptAndFencesLateResult(t *testing.T) {
 }
 
 func TestReaperDoesNotRetryRefreshedCandidate(t *testing.T) {
+	t.Parallel()
+
 	repo, svc, first := fencingSubmission(t)
 	first.NextAttemptAt = time.Now().Add(-time.Minute)
 	repo.submissions[first.ID] = first
@@ -106,6 +119,8 @@ func TestReaperDoesNotRetryRefreshedCandidate(t *testing.T) {
 }
 
 func TestExpiredResultUsesSameTransitionAsReaper(t *testing.T) {
+	t.Parallel()
+
 	for _, attempts := range []int{1, 3} {
 		for _, byResult := range []bool{false, true} {
 			repo, svc, s := fencingSubmission(t)
@@ -135,8 +150,12 @@ func TestExpiredResultUsesSameTransitionAsReaper(t *testing.T) {
 
 // Ошибка чтения БД должна ретраиться, а не превращаться в rejected result.
 func TestResultReadFailureRemainsRetryable(t *testing.T) {
-	for _, stage := range []string{"lock", "version"} {
+	t.Parallel()
+
+	for _, stage := range []string{"lock", versionStage} {
 		t.Run(stage, func(t *testing.T) {
+			t.Parallel()
+
 			repo, svc, s := fencingSubmission(t)
 			svc.repository = failedResultRead{Repository: repo, stage: stage}
 			err := svc.HandleRunResult(context.Background(), fencingMeta(99), fencingResult(s, "ok"))
@@ -159,11 +178,13 @@ func (f failedResultRead) GetCodeSubmissionForUpdate(ctx context.Context, id uui
 	if f.stage == "lock" {
 		return domain.CodeSubmission{}, errors.New("database unavailable")
 	}
+
 	return f.Repository.GetCodeSubmissionForUpdate(ctx, id)
 }
 func (f failedResultRead) GetTaskVersion(ctx context.Context, id, version uuid.UUID) (domain.TaskVersion, error) {
-	if f.stage == "version" {
+	if f.stage == versionStage {
 		return domain.TaskVersion{}, errors.New("database unavailable")
 	}
+
 	return f.Repository.GetTaskVersion(ctx, id, version)
 }

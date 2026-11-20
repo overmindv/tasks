@@ -9,6 +9,8 @@ import (
 )
 
 func TestRunModeHash(t *testing.T) {
+	t.Parallel()
+
 	id := uuid.New()
 	input := CodeSubmissionInput{TaskVersionID: uuid.New(), Language: "python", SourceFileName: "a.py", SourceCode: "print(1)"}
 	legacy := legacyCodeRequestHash(id, input)
@@ -21,6 +23,8 @@ func TestRunModeHash(t *testing.T) {
 }
 
 func TestLegacyModeIdempotency(t *testing.T) {
+	t.Parallel()
+
 	input := CodeSubmissionInput{TaskVersionID: uuid.New(), Language: "python", SourceCode: "print(1)"}
 	id := uuid.New()
 	legacy := legacyCodeRequestHash(id, input)
@@ -35,6 +39,8 @@ func TestLegacyModeIdempotency(t *testing.T) {
 	}
 }
 func TestGradedCheckerAndPrivacy(t *testing.T) {
+	t.Parallel()
+
 	suite := &domain.PublishedSuite{Definition: domain.SuiteDefinition{Checker: "exact", Cases: []domain.SuiteCase{{ID: "hidden", Input: "secret", Output: "ok", Hidden: true}}}}
 	r := execution.RunResult{Status: "ok", Summary: execution.ResultSummary{CasesTotal: 1}, Cases: []execution.CaseRunResult{{Index: 0, Status: "ok", Stdout: "ok\n", Stderr: "secret"}}}
 	verdict, tests, _ := verdictFromSuiteResult(r, suite)
