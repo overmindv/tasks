@@ -18,6 +18,11 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
+const (
+	mismatchMode = "mismatch"
+	hiddenInput  = "HIDDEN_INPUT"
+)
+
 // fakeResultHandler имитирует контракт resultHandler без Kafka и PostgreSQL.
 type fakeResultHandler struct {
 	handleErr error
@@ -236,38 +241,42 @@ func validResultPayload(submissionID, attemptID string) []byte {
 }
 
 func TestResultLogsNeverContainExecutionOutput(t *testing.T) {
-	for _, mode := range []string{"processed", "invalid", "mismatch"} {
+	t.Parallel()
+
+	for _, mode := range []string{"processed", "invalid", mismatchMode} {
 		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+
 			payload := validResultPayload(uuid.NewString(), uuid.NewString())
 			var result map[string]any
 			if err := json.Unmarshal(payload, &result); err != nil {
 				t.Fatal(err)
 			}
-			result["logs"] = map[string]any{"stdout": "HIDDEN_INPUT", "stderr": "HIDDEN_INPUT", "stdout_artifact": map[string]any{"url": "https://artifact.invalid/HIDDEN_INPUT"}}
-			result["error"] = map[string]any{"code": "HIDDEN_INPUT", "message": "HIDDEN_INPUT", "retryable": false}
+			result["logs"] = map[string]any{"stdout": hiddenInput, "stderr": hiddenInput, "stdout_artifact": map[string]any{"url": "https://artifact.invalid/HIDDEN_INPUT"}}
+			result["error"] = map[string]any{"code": hiddenInput, "message": hiddenInput, "retryable": false}
 			correlation := uuid.NewString()
 			result["trace_id"] = correlation
-			if mode == "mismatch" {
-				result["submission_id"] = "HIDDEN_INPUT"
-				result["attempt_id"] = "HIDDEN_INPUT"
+			if mode == mismatchMode {
+				result["submission_id"] = hiddenInput
+				result["attempt_id"] = hiddenInput
 			}
 			if mode == "invalid" {
-				result["unexpected"] = "HIDDEN_INPUT"
+				result["unexpected"] = hiddenInput
 			}
 			raw, err := json.Marshal(result)
 			if err != nil {
 				t.Fatal(err)
 			}
 			handler := &fakeResultHandler{}
-			if mode == "mismatch" {
-				handler.handleErr = apperror.New(apperror.ExecutionResultMismatch, "mismatch", 409)
+			if mode == mismatchMode {
+				handler.handleErr = apperror.New(apperror.ExecutionResultMismatch, mismatchMode, 409)
 			}
 			var logs bytes.Buffer
 			logger := slog.New(slog.NewJSONHandler(&logs, nil))
 			if err := processResult(context.Background(), &kgo.Record{Topic: "results", Value: raw}, handler, logger); err != nil {
 				t.Fatal(err)
 			}
-			if strings.Contains(logs.String(), "HIDDEN_INPUT") || strings.Contains(logs.String(), "artifact.invalid") {
+			if strings.Contains(logs.String(), hiddenInput) || strings.Contains(logs.String(), "artifact.invalid") {
 				t.Fatalf("raw result logged: %s", logs.String())
 			}
 			if logged := strings.Contains(logs.String(), correlation); logged != (mode == "processed") {
