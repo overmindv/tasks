@@ -55,22 +55,22 @@ func (s *SubmissionService) Submit(ctx context.Context, taskID, userID uuid.UUID
 	}
 	var submission domain.Submission
 	err = s.repository.WithinTransaction(ctx, func(tx repository.Repository) error {
-		task, err := tx.GetTask(ctx, taskID, true)
-		if err != nil {
-			return fmt.Errorf("get task for submission: %w", err)
+		task, taskErr := tx.GetTask(ctx, taskID, true)
+		if taskErr != nil {
+			return fmt.Errorf("get task for submission: %w", taskErr)
 		}
 		if task.Status != domain.TaskStatusPublished {
 			return apperror.New(apperror.TaskNotAvailable, "тест недоступен для решения", http.StatusConflict)
 		}
-		version, err := tx.GetTaskVersion(ctx, taskID, input.TaskVersionID)
-		if err != nil {
-			return fmt.Errorf("get submitted task version: %w", err)
+		version, versionErr := tx.GetTaskVersion(ctx, taskID, input.TaskVersionID)
+		if versionErr != nil {
+			return fmt.Errorf("get submitted task version: %w", versionErr)
 		}
 		if version.TaskType == domain.TaskTypeProgramming {
 			return apperror.New(apperror.TaskTypeNotSubmittable, "программная задача не принимает ответы в сервисе", http.StatusConflict)
 		}
-		if err := validateSelectedOptions(version, selected); err != nil {
-			return err
+		if validationErr := validateSelectedOptions(version, selected); validationErr != nil {
+			return validationErr
 		}
 		correctIDs := lo.FilterMap(version.Options, func(option domain.TaskOption, _ int) (uuid.UUID, bool) {
 			return option.ID, option.IsCorrect
@@ -91,11 +91,11 @@ func (s *SubmissionService) Submit(ctx context.Context, taskID, userID uuid.UUID
 			SelectedOptionIDs: selected,
 			CorrectOptionIDs:  correctIDs,
 		}
-		if err := tx.InsertSubmission(ctx, submission); err != nil {
-			return fmt.Errorf("insert submission: %w", err)
+		if insertErr := tx.InsertSubmission(ctx, submission); insertErr != nil {
+			return fmt.Errorf("insert submission: %w", insertErr)
 		}
-		if err := tx.InsertSubmissionAnswers(ctx, submission.ID, version.ID, selected); err != nil {
-			return fmt.Errorf("insert submission answers: %w", err)
+		if answersErr := tx.InsertSubmissionAnswers(ctx, submission.ID, version.ID, selected); answersErr != nil {
+			return fmt.Errorf("insert submission answers: %w", answersErr)
 		}
 		if s.learningOutcomes {
 			return recordLearningOutcome(ctx, tx, version, userID, submission.ID, domain.ExecutionVerdict(verdict), nil)

@@ -22,6 +22,8 @@ func (c *taskActivityCapture) InsertTaskActivityOutbox(_ context.Context, event 
 }
 
 func TestTaskPublicationKeepsOutboxIdentity(t *testing.T) {
+	t.Parallel()
+
 	capture := &taskActivityCapture{}
 	taskID := uuid.New()
 	version := domain.TaskVersion{Title: "Sorting"}
