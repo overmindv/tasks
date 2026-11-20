@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LearningOutcomeV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "event_type", "schema_version", "aggregate_id", "aggregate_version", "occurred_at", "payload"],
+  "$defs": {
+    "id": {"type": "string", "format": "uuid"},
+    "version": {"type": "integer", "minimum": 1}
+  },
+  "properties": {
+    "event_id": {"$ref": "#/$defs/id"},
+    "event_type": {"const": "learning.outcome.v1"},
+    "schema_version": {"const": 1},
+    "aggregate_id": {"$ref": "#/$defs/id"},
+    "aggregate_version": {"$ref": "#/$defs/version"},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "correlation_id": {"$ref": "#/$defs/id"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["submission_id", "learner_id", "task_id", "task_version_id", "topic_ids", "verdict", "graded_at", "first_independent_attempt", "correction_version"],
+      "properties": {
+        "submission_id": {"$ref": "#/$defs/id"},
+        "learner_id": {"$ref": "#/$defs/id"},
+        "task_id": {"$ref": "#/$defs/id"},
+        "task_version_id": {"$ref": "#/$defs/id"},
+        "topic_ids": {"type": "array", "uniqueItems": true, "maxItems": 8, "items": {"$ref": "#/$defs/id"}},
+        "verdict": {
+          "enum": ["accepted", "wrong_answer", "compilation_error", "runtime_error", "time_limit_exceeded", "memory_limit_exceeded", "output_limit_exceeded"]
+        },
+        "graded_at": {"type": "string", "format": "date-time"},
+        "first_independent_attempt": {"type": "boolean"},
+        "correction_version": {"$ref": "#/$defs/version"}
+      }
+    }
+  }
+}

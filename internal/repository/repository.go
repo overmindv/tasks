@@ -37,6 +37,8 @@ type Repository interface {
 	FindSubmissionByIdempotency(ctx context.Context, userID, key uuid.UUID) (*domain.Submission, error)
 	InsertSubmission(ctx context.Context, submission domain.Submission) error
 	InsertSubmissionAnswers(ctx context.Context, submissionID, versionID uuid.UUID, optionIDs []uuid.UUID) error
+	FirstLearningOutcome(ctx context.Context, learner, task, submission uuid.UUID) (bool, error)
+	InsertLearningOutcome(ctx context.Context, event domain.LearningOutcome) error
 	GetSubmission(ctx context.Context, id uuid.UUID) (domain.Submission, error)
 	ListSubmissions(ctx context.Context, filter domain.SubmissionFilter) ([]domain.Submission, error)
 	FindCodeSubmissionByIdempotency(ctx context.Context, userID, key uuid.UUID) (*domain.CodeSubmission, error)

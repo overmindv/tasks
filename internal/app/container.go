@@ -73,6 +73,9 @@ func Build(app *parker.App) error {
 
 	taskService := usecase.NewTaskService(store)
 	submissionService := usecase.NewSubmissionService(store)
+	if cfg.LearningOutcomes {
+		submissionService = usecase.NewSubmissionServiceWithOutcomes(store)
+	}
 	languageVersions := map[domain.ProgrammingLanguage]string{
 		domain.ProgrammingLanguagePython: cfg.PythonVersion,
 		domain.ProgrammingLanguageGo:     cfg.GoVersion,
@@ -80,6 +83,7 @@ func Build(app *parker.App) error {
 	codeSubmissionService := usecase.NewCodeSubmissionService(store, usecase.CodeExecutionPolicy{
 		MaxPendingPerUser: cfg.AdmissionMaxPerUser, MaxPendingTotal: cfg.AdmissionMaxTotal, AdmissionRetrySeconds: cfg.AdmissionRetrySeconds,
 		RequestsTopic:    cfg.KafkaRequestsTopic,
+		LearningOutcomes: cfg.LearningOutcomes,
 		TimeLimit:        cfg.CodeExecutionTimeout,
 		MemoryLimitBytes: cfg.CodeExecutionMemory,
 		MaxAttempts:      cfg.ExecutionMaxAttempts,
@@ -127,6 +131,10 @@ func Build(app *parker.App) error {
 
 	app.AddRunnable("kafka-outbox", dispatcher.Run)
 	app.AddRunnable("task-activity-outbox", activityDispatcher.Run)
+	if cfg.LearningOutcomes {
+		queue := postgresadapter.NewLearningOutcomeOutbox(pool)
+		app.AddRunnable("learning-outcome-outbox", kafkaadapter.NewOutboxDispatcher(queue, producer, cfg.OutboxPollInterval, app.Logger()).Run)
+	}
 	app.AddRunnable("kafka-results", func(ctx context.Context) error {
 		defer consumerClient.Close()
 		return consumer.Run(ctx)

@@ -45,11 +45,12 @@ make dev
 make test
 go vet ./...
 make lint
-make ctest COMPONENT_TEST_DSN='postgres://postgres:postgres@localhost:5432/tasks?sslmode=disable'
+make ctest COMPONENT_TEST_DSN='postgres://postgres:postgres@localhost:5432/tasks_test?sslmode=disable'
 docker build -t tasks:local .
 ```
 
-`make ctest` применяет миграции к выделенной тестовой БД и запускает полный HTTP-сценарий. Не направляйте эту команду на общую или production database: тест очищает таблицы `tasks`.
+`make ctest` требует отдельную БД с именем, оканчивающимся на `_test`, и явный
+`COMPONENT_TEST_DSN`. Команда применяет миграции и запускает компонентные тесты.
 
 ## Разработка
 

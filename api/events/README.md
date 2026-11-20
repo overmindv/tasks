@@ -15,3 +15,6 @@ producer и не определяют формат учебных outcome events
 запустить `python scripts/check_execution_contract.py` из корня сервиса.
 Сверка двух checkout: `python scripts/check_execution_contract.py --peer ../sandbox`.
 Fixtures синтетические; содержат только открытые примеры.
+
+Учебные результаты используют отдельную схему [learning.outcome.v1](learning.outcome.v1.json).
+Поля, настройки доступа и порядок доставки описаны в [учебном потоке](../../docs/learning-outcomes.md).

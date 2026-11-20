@@ -26,14 +26,17 @@ type SubmitInput struct {
 
 // SubmissionService проверяет ответы и управляет историей решений.
 type SubmissionService struct {
-	repository repository.Repository
+	repository       repository.Repository
+	learningOutcomes bool
 }
 
 // NewSubmissionService создаёт use-case сервис решений.
 func NewSubmissionService(store repository.Repository) *SubmissionService {
-	return &SubmissionService{
-		repository: store,
-	}
+	return &SubmissionService{repository: store}
+}
+
+func NewSubmissionServiceWithOutcomes(store repository.Repository) *SubmissionService {
+	return &SubmissionService{repository: store, learningOutcomes: true}
 }
 
 // Submit проверяет ответ по указанной версии и сохраняет результат.
@@ -93,6 +96,9 @@ func (s *SubmissionService) Submit(ctx context.Context, taskID, userID uuid.UUID
 		}
 		if err := tx.InsertSubmissionAnswers(ctx, submission.ID, version.ID, selected); err != nil {
 			return fmt.Errorf("insert submission answers: %w", err)
+		}
+		if s.learningOutcomes {
+			return recordLearningOutcome(ctx, tx, version, userID, submission.ID, domain.ExecutionVerdict(verdict), nil)
 		}
 
 		return nil

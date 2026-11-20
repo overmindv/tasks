@@ -4,7 +4,6 @@ package component
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -17,7 +16,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	postgresadapter "github.com/overmindv/tasks/internal/adapter/postgres"
 	"github.com/overmindv/tasks/internal/execution"
 	"github.com/overmindv/tasks/internal/transport/httpapi"
@@ -61,20 +59,8 @@ type codeSubmissionPayload struct {
 
 // TestVersionedTaskFlow проверяет полный сценарий создания, решения, обновления и удаления.
 func TestVersionedTaskFlow(t *testing.T) {
-	// Подготовка: DSN, pool, очистка таблиц, HTTP-handler и доверенные ID.
-	dsn := os.Getenv("COMPONENT_TEST_DSN")
-	if dsn == "" {
-		t.Fatal("COMPONENT_TEST_DSN не задан")
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New() error = %v", err)
-	}
-	defer pool.Close()
-	if _, err := pool.Exec(ctx, "TRUNCATE code_execution_result_inbox, code_submission_outbox, code_submissions, submission_answers, submissions, task_options, task_versions, tasks CASCADE"); err != nil {
-		t.Fatalf("truncate component database: %v", err)
-	}
+	ctx := t.Context()
+	pool := openComponentDB(t)
 	store := postgresadapter.New(pool)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	codeService := usecase.NewCodeSubmissionService(store, usecase.CodeExecutionPolicy{
@@ -199,17 +185,15 @@ func TestVersionedTaskFlow(t *testing.T) {
 		len(requestEvent.Execution.Inputs) != 1 || requestEvent.Execution.Inputs[0] != "hello" {
 		t.Fatalf("request event = %#v", requestEvent)
 	}
-	// Готовность fixture задаётся часами PostgreSQL: host и Docker clock могут различаться.
-	if _, err := pool.Exec(ctx, "UPDATE code_submission_outbox SET available_at=now()-interval '1 second' WHERE aggregate_id=$1", code.ID); err != nil {
-		t.Fatal(err)
-	}
 	claimToken := uuid.New()
-	claimed, err := store.ClaimOutboxMessages(ctx, 10, claimToken, time.Now().UTC().Add(time.Minute))
-	if err != nil || len(claimed) != 1 {
-		t.Fatalf("ClaimOutboxMessages() = %d, %v", len(claimed), err)
+	var outboxID uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		UPDATE code_submission_outbox SET claim_token=$2, claimed_until=now()+interval '1 minute'
+		WHERE aggregate_id=$1 RETURNING id`, code.ID, claimToken).Scan(&outboxID); err != nil {
+		t.Fatal("reserve fixture outbox item:", err)
 	}
-	if err := store.MarkOutboxPublished(ctx, claimed[0].ID, claimToken); err != nil {
-		t.Fatalf("MarkOutboxPublished() error = %v", err)
+	if err := store.MarkOutboxPublished(ctx, outboxID, claimToken); err != nil {
+		t.Fatal("mark fixture outbox item sent:", err)
 	}
 	var sourcePreserved bool
 	var payloadCleared bool
@@ -243,7 +227,7 @@ func TestVersionedTaskFlow(t *testing.T) {
 		CreatedAt: time.Now().UTC(),
 	}
 	if err := codeService.HandleRunResult(ctx, usecase.ExecutionMessageMetadata{
-		Topic:         "code-execution.results.v1",
+		Topic:         "fixture.results." + code.ID,
 		Partition:     0,
 		Offset:        1,
 		PayloadSHA256: strings.Repeat("a", 64),

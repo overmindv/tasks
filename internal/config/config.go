@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/overmindv/tasks/internal/domain"
 )
 
 const (
@@ -42,6 +44,7 @@ type Config struct {
 	KafkaRequestsTopic      string
 	KafkaResultsTopic       string
 	KafkaResultsGroup       string
+	LearningOutcomes        bool
 	CodeExecutionTimeout    time.Duration
 	CodeExecutionMemory     int64
 	OutboxPollInterval      time.Duration
@@ -112,6 +115,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	learningOutcomes, err := strconv.ParseBool(env("TASKS_LEARNING_OUTCOMES_ENABLED", "false"))
+	if err != nil {
+		return Config{}, errors.New("TASKS_LEARNING_OUTCOMES_ENABLED must be a boolean")
+	}
 	cfg := Config{
 		AdmissionMaxPerUser: maxUser, AdmissionMaxTotal: maxTotal, AdmissionRetrySeconds: retrySeconds,
 		TaskHunterIngestToken:   strings.TrimSpace(os.Getenv("TASK_HUNTER_INGEST_TOKEN")),
@@ -121,6 +128,7 @@ func Load() (Config, error) {
 		KafkaRequestsTopic:      env("KAFKA_REQUESTS_TOPIC", defaultRequestTopic),
 		KafkaResultsTopic:       env("KAFKA_RESULTS_TOPIC", defaultResultTopic),
 		KafkaResultsGroup:       env("KAFKA_RESULTS_CONSUMER_GROUP", defaultResultGroup),
+		LearningOutcomes:        learningOutcomes,
 		CodeExecutionTimeout:    executionTimeout,
 		CodeExecutionMemory:     memoryBytes,
 		OutboxPollInterval:      outboxPollInterval,
@@ -164,6 +172,9 @@ func (c Config) Validate() error {
 	}
 	if c.KafkaRequestsTopic == c.KafkaResultsTopic {
 		return errors.New("kafka request и result topics должны различаться")
+	}
+	if c.KafkaRequestsTopic == domain.LearningOutcomeTopic || c.KafkaResultsTopic == domain.LearningOutcomeTopic {
+		return errors.New("learning outcome topic cannot carry execution messages")
 	}
 	if c.CodeExecutionTimeout < time.Millisecond || c.CodeExecutionTimeout > time.Minute {
 		return errors.New("CODE_EXECUTION_TIME_LIMIT должен быть от 1ms до 1m")

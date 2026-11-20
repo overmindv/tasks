@@ -29,12 +29,33 @@ func (r *Postgres) InsertOutboxMessage(ctx context.Context, message domain.Outbo
 	return nil
 }
 
-// ClaimOutboxMessages кратко резервирует доступную пачку без удержания транзакции во время Kafka I/O.
+type outboxQueue struct {
+	query    querier
+	learning bool
+}
+
+func NewLearningOutcomeOutbox(pool querier) *outboxQueue {
+	return &outboxQueue{query: pool, learning: true}
+}
+
+func (q outboxQueue) table() string {
+	if q.learning {
+		return "learning_outcome_outbox"
+	}
+	return "code_submission_outbox"
+}
+
 func (r *Postgres) ClaimOutboxMessages(ctx context.Context, limit int, claimToken uuid.UUID, claimedUntil time.Time) ([]domain.OutboxMessage, error) {
-	rows, err := r.query.Query(ctx, `
+	return (outboxQueue{query: r.query}).ClaimOutboxMessages(ctx, limit, claimToken, claimedUntil)
+}
+
+// ClaimOutboxMessages резервирует пачку, не удерживая транзакцию во время публикации.
+func (q outboxQueue) ClaimOutboxMessages(ctx context.Context, limit int, claimToken uuid.UUID, claimedUntil time.Time) ([]domain.OutboxMessage, error) {
+	table := q.table()
+	rows, err := q.query.Query(ctx, `
         WITH due AS (
             SELECT id
-            FROM code_submission_outbox
+            FROM `+table+`
             WHERE published_at IS NULL
               AND available_at <= now()
               AND (claimed_until IS NULL OR claimed_until < now())
@@ -42,7 +63,7 @@ func (r *Postgres) ClaimOutboxMessages(ctx context.Context, limit int, claimToke
             FOR UPDATE SKIP LOCKED
             LIMIT $1
         )
-        UPDATE code_submission_outbox o
+        UPDATE `+table+` o
         SET claim_token = $2,
             claimed_until = $3,
             updated_at = now()
@@ -88,12 +109,13 @@ func (r *Postgres) ClaimOutboxMessages(ctx context.Context, limit int, claimToke
 	return messages, nil
 }
 
-// MarkOutboxPublished подтверждает публикацию outbox-сообщения и очищает его payload.
-// Исходный код решения в code_submissions сохраняется, чтобы его можно было вернуть
-// в ответе API («show code result») на странице деталей запуска.
 func (r *Postgres) MarkOutboxPublished(ctx context.Context, id, claimToken uuid.UUID) error {
-	tag, err := r.query.Exec(ctx, `
-		UPDATE code_submission_outbox
+	return (outboxQueue{query: r.query}).MarkOutboxPublished(ctx, id, claimToken)
+}
+
+func (q outboxQueue) MarkOutboxPublished(ctx context.Context, id, claimToken uuid.UUID) error {
+	tag, err := q.query.Exec(ctx, `
+		UPDATE `+q.table()+`
 		SET payload = NULL,
 			published_at = now(),
 			claim_token = NULL,
@@ -111,13 +133,16 @@ func (r *Postgres) MarkOutboxPublished(ctx context.Context, id, claimToken uuid.
 	return nil
 }
 
-// ReleaseOutboxMessage освобождает сообщение и назначает повтор после безопасной задержки.
 func (r *Postgres) ReleaseOutboxMessage(ctx context.Context, id, claimToken uuid.UUID, availableAt time.Time, lastError string) error {
+	return (outboxQueue{query: r.query}).ReleaseOutboxMessage(ctx, id, claimToken, availableAt, lastError)
+}
+
+func (q outboxQueue) ReleaseOutboxMessage(ctx context.Context, id, claimToken uuid.UUID, availableAt time.Time, lastError string) error {
 	if len(lastError) > 1000 {
 		lastError = lastError[:1000]
 	}
-	tag, err := r.query.Exec(ctx, `
-        UPDATE code_submission_outbox
+	tag, err := q.query.Exec(ctx, `
+        UPDATE `+q.table()+`
         SET attempts = attempts + 1,
             available_at = $3,
             claim_token = NULL,
