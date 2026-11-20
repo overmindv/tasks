@@ -17,5 +17,6 @@ type EvaluationContext struct {
 func InputSuiteSHA256(inputs []string) string {
 	payload, _ := json.Marshal(inputs)
 	sum := sha256.Sum256(payload)
+
 	return hex.EncodeToString(sum[:])
 }

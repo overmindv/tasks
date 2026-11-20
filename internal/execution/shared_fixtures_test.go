@@ -14,7 +14,9 @@ func TestSharedExecutionFixtures(t *testing.T) {
 	root := "../../tests/fixtures/execution-contract"
 	for _, mode := range []string{"execution", "execution-go", "pytest", "go-test"} {
 		t.Run(mode, func(t *testing.T) {
-			payload, err := os.ReadFile(filepath.Join(root, mode+".result.json"))
+			t.Parallel()
+
+			payload, err := os.ReadFile(filepath.Join(root, mode+".result.json")) //nolint:gosec // mode ограничен фиксированным набором fixtures
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -28,13 +30,13 @@ func TestSharedExecutionFixtures(t *testing.T) {
 			if mode != "execution" && mode != "execution-go" {
 				return
 			} // tasks пока публикует только stdin-прогоны.
-			payload, err = os.ReadFile(filepath.Join(root, mode+".request.json"))
+			payload, err = os.ReadFile(filepath.Join(root, mode+".request.json")) //nolint:gosec // mode ограничен фиксированным набором fixtures
 			if err != nil {
 				t.Fatal(err)
 			}
 			var request RunRequest
-			if err := json.Unmarshal(payload, &request); err != nil {
-				t.Fatal(err)
+			if decodeErr := json.Unmarshal(payload, &request); decodeErr != nil {
+				t.Fatal(decodeErr)
 			}
 			if result.EvaluationContext == nil || result.EvaluationContext.TaskVersionID != request.Metadata["task_version_id"] || result.EvaluationContext.SuiteSHA256 != InputSuiteSHA256(request.Execution.Inputs) {
 				t.Fatal("fixture evaluation context does not match inputs/version")

@@ -25,6 +25,7 @@ func (m *Execution) Handler(token string) (http.Handler, error) {
 
 	want := sha256.Sum256([]byte(token))
 	scrape := promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{MaxRequestsInFlight: 2})
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		auth := r.Header.Values("Authorization")
@@ -33,6 +34,7 @@ func (m *Execution) Handler(token string) (http.Handler, error) {
 				got := sha256.Sum256([]byte(value))
 				if subtle.ConstantTimeCompare(want[:], got[:]) == 1 {
 					scrape.ServeHTTP(w, r)
+
 					return
 				}
 			}
