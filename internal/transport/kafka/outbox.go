@@ -33,6 +33,7 @@ type OutboxDispatcher struct {
 
 func (d *OutboxDispatcher) WithExecutionMetrics(metrics *observability.Execution) *OutboxDispatcher {
 	d.metrics = metrics
+
 	return d
 }
 
@@ -63,6 +64,7 @@ func (d *OutboxDispatcher) Run(ctx context.Context) error {
 				return nil
 			case <-time.After(d.pollInterval):
 			}
+
 			continue
 		}
 		select {

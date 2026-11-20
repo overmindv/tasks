@@ -47,6 +47,7 @@ func (h *suiteHandler) create(w http.ResponseWriter, r *http.Request) {
 	d, err := h.service.Create(r.Context(), id, input.BaseVersionID, input.Definition)
 	if err != nil {
 		writeError(w, err, h.logger)
+
 		return
 	}
 	writeJSON(w, 201, d)
@@ -62,6 +63,7 @@ func (h *suiteHandler) get(w http.ResponseWriter, r *http.Request) {
 	d, err := h.service.Get(r.Context(), id)
 	if err != nil {
 		writeError(w, err, h.logger)
+
 		return
 	}
 	writeJSON(w, 200, d)
@@ -81,6 +83,7 @@ func (h *suiteHandler) update(w http.ResponseWriter, r *http.Request) {
 	d, err := h.service.Update(r.Context(), id, input.Revision, input.Definition)
 	if err != nil {
 		writeError(w, err, h.logger)
+
 		return
 	}
 	writeJSON(w, 200, d)
@@ -99,6 +102,7 @@ func (h *suiteHandler) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.service.Delete(r.Context(), id, input.Revision); err != nil {
 		writeError(w, err, h.logger)
+
 		return
 	}
 	w.WriteHeader(204)
@@ -119,6 +123,7 @@ func (h *suiteHandler) publish(w http.ResponseWriter, r *http.Request) {
 	s, err := h.service.Publish(r.Context(), id, input.Revision, a.UserID)
 	if err != nil {
 		writeError(w, err, h.logger)
+
 		return
 	}
 	writeJSON(w, 200, struct {

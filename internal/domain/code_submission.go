@@ -46,7 +46,7 @@ const (
 	ExecutionVerdictOutputLimitExceeded ExecutionVerdict = "output_limit_exceeded"
 	ExecutionVerdictCheckerError        ExecutionVerdict = "checker_error"
 	ExecutionVerdictInfrastructureError ExecutionVerdict = "infrastructure_error"
-	ExecutionVerdictCancelled           ExecutionVerdict = "cancelled"
+	ExecutionVerdictCancelled           ExecutionVerdict = "canceled"
 )
 
 // ExecutionPhaseResult хранит безопасный результат компиляции или запуска.

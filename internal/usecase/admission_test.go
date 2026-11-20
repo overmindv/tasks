@@ -11,6 +11,8 @@ import (
 )
 
 func TestCodeAdmission(t *testing.T) {
+	t.Parallel()
+
 	repo, svc, taskID, versionID := newCodeSubmissionService()
 	svc.policy.MaxPendingPerUser = 1
 	svc.policy.MaxPendingTotal = 2

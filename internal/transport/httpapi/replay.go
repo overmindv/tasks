@@ -25,6 +25,7 @@ func (h *Handler) replayCode(w http.ResponseWriter, r *http.Request) {
 	result, err := h.code.Replay(r.Context(), id, input.ExpectedAttemptID, actor.UserID, actor.Admin)
 	if err != nil {
 		writeError(w, err, h.logger)
+
 		return
 	}
 	writeJSON(w, http.StatusAccepted, responseCodeSubmission(result))

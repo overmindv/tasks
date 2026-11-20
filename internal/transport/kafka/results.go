@@ -78,6 +78,7 @@ func (c *ResultConsumer) run(ctx context.Context, budget time.Duration) error {
 			}
 			c.client.AllowRebalance()
 			retry = time.Second
+
 			continue
 		}
 		c.client.AllowRebalance()
@@ -110,8 +111,8 @@ func (c *ResultConsumer) processAndCommit(ctx context.Context, record *kgo.Recor
 			processed = err == nil
 		}
 		if processed {
-			if err := ctx.Err(); err != nil {
-				return err
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
 			}
 			stage = "commit"
 			err = c.client.CommitRecords(ctx, record)

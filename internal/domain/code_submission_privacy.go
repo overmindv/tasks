@@ -20,6 +20,7 @@ func PublicCodeSubmission(submission CodeSubmission) CodeSubmission {
 		}
 		submission.Failure = SafeExecutionFailure(verdict)
 	}
+
 	return submission
 }
 
@@ -27,6 +28,7 @@ func publicExecutionPhase(phase *ExecutionPhaseResult) *ExecutionPhaseResult {
 	if phase == nil {
 		return nil
 	}
+
 	return &ExecutionPhaseResult{ExitCode: phase.ExitCode, DurationMS: phase.DurationMS, MemoryBytes: phase.MemoryBytes}
 }
 
@@ -49,7 +51,8 @@ func SafeExecutionFailure(verdict ExecutionVerdict) *ExecutionFailure {
 	case ExecutionVerdictWrongAnswer:
 		code = "WRONG_ANSWER"
 	case ExecutionVerdictCancelled:
-		code = "CANCELLED"
+		code = "CANCELED"
 	}
+
 	return &ExecutionFailure{Code: code, Message: "execution could not be completed successfully"}
 }

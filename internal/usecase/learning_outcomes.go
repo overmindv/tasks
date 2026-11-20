@@ -22,6 +22,7 @@ func recordLearningOutcome(ctx context.Context, tx repository.Repository, versio
 		topics = append(topics, *version.TopicID)
 	}
 	at := time.Now().UTC()
+
 	return tx.InsertLearningOutcome(ctx, domain.LearningOutcome{
 		EventID: uuid.New(), EventType: domain.LearningOutcomeTopic, SchemaVersion: 1,
 		AggregateID: submission, AggregateVersion: 1, OccurredAt: at, CorrelationID: correlation,

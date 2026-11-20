@@ -26,6 +26,8 @@ func (r *problemListMemoryRepository) GetProblemListDetail(_ context.Context, _ 
 
 // TestProblemListServiceList проверяет журнал списков с числом членов.
 func TestProblemListServiceList(t *testing.T) {
+	t.Parallel()
+
 	repo := &problemListMemoryRepository{lists: []domain.ProblemListSummary{
 		{
 			ProblemList: domain.ProblemList{
@@ -48,6 +50,8 @@ func TestProblemListServiceList(t *testing.T) {
 
 // TestProblemListServiceGet проверяет детали списка с членами.
 func TestProblemListServiceGet(t *testing.T) {
+	t.Parallel()
+
 	taskID := uuid.New()
 	repo := &problemListMemoryRepository{detail: domain.ProblemListDetail{
 		ProblemList: domain.ProblemList{

@@ -9,6 +9,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+const unknownLabel = "unknown"
+
 type AttemptKind uint8
 
 const (
@@ -50,6 +52,7 @@ func NewExecution() *Execution {
 	sampleOK := prometheus.NewGauge(gaugeOpts("queue_sample_ok", "Whether the latest execution queue sample succeeded."))
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(attempts, rejected, verdicts, latency, publish, queue, sampleOK)
+
 	return &Execution{
 		registry:  registry,
 		attempts:  [3]prometheus.Counter{attempts.WithLabelValues("initial"), attempts.WithLabelValues("retry"), attempts.WithLabelValues("replay")},
@@ -87,7 +90,7 @@ func (m *Execution) Final(mode domain.RunMode, verdict domain.ExecutionVerdict, 
 	if m == nil {
 		return
 	}
-	label := "unknown"
+	label := unknownLabel
 	switch mode {
 	case domain.RunModeSamples, domain.RunModeGraded:
 		label = string(mode)
@@ -136,6 +139,7 @@ func (m *Execution) SampleQueue(ctx context.Context, store QueueReader) error {
 		case <-ticker.C:
 		}
 	}
+
 	return nil
 }
 
@@ -146,6 +150,7 @@ func (m *Execution) sampleQueue(ctx context.Context, store QueueReader) {
 	outbox, result, err := store.ExecutionQueueAges(ctx)
 	if err != nil {
 		m.sampleOK.Set(0)
+
 		return
 	}
 	m.outboxAge.Set(outbox)

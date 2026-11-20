@@ -19,5 +19,6 @@ func (r *Postgres) ExecutionQueueAges(ctx context.Context) (outbox, result float
 	if err != nil {
 		return 0, 0, fmt.Errorf("read execution queue ages: %w", err)
 	}
+
 	return outbox, result, nil
 }

@@ -30,6 +30,7 @@ func NewSuiteService(r repository.Repository, o SuiteObjectStore, configured ...
 			versions[k] = v
 		}
 	}
+
 	return &SuiteService{repository: r, objects: o, versions: versions}
 }
 func suiteConflict() error {
@@ -55,8 +56,10 @@ func (s *SuiteService) Create(ctx context.Context, taskID, baseID uuid.UUID, def
 		if version.TaskType != domain.TaskTypeProgramming {
 			return apperror.New(apperror.TaskTypeNotSubmittable, "programming task required", 409)
 		}
+
 		return tx.InsertSuiteDraft(ctx, draft)
 	})
+
 	return draft, err
 }
 func (s *SuiteService) Get(ctx context.Context, id uuid.UUID) (domain.SuiteDraft, error) {
@@ -85,8 +88,10 @@ func (s *SuiteService) Update(ctx context.Context, id uuid.UUID, revision int, d
 		}
 		d.Revision++
 		result = d
+
 		return nil
 	})
+
 	return result, err
 }
 func (s *SuiteService) Delete(ctx context.Context, id uuid.UUID, revision int) error {
@@ -97,6 +102,7 @@ func (s *SuiteService) Delete(ctx context.Context, id uuid.UUID, revision int) e
 	if !ok {
 		return suiteConflict()
 	}
+
 	return nil
 }
 func (s *SuiteService) Publish(ctx context.Context, id uuid.UUID, revision int, actor uuid.UUID) (domain.PublishedSuite, error) {
@@ -110,8 +116,8 @@ func (s *SuiteService) Publish(ctx context.Context, id uuid.UUID, revision int, 
 	if d.PublishedVersionID != nil {
 		return s.published(ctx, d.TaskID, *d.PublishedVersionID)
 	}
-	if err := domain.ValidateSuite(d.Definition, true); err != nil {
-		return domain.PublishedSuite{}, validation(err)
+	if validationErr := domain.ValidateSuite(d.Definition, true); validationErr != nil {
+		return domain.PublishedSuite{}, validation(validationErr)
 	}
 	if s.versions[d.Definition.Language] != d.Definition.LanguageVersion {
 		return domain.PublishedSuite{}, apperror.New(apperror.ValidationError, "suite runtime is not configured", 400)
@@ -122,66 +128,69 @@ func (s *SuiteService) Publish(ctx context.Context, id uuid.UUID, revision int, 
 	version := strconv.Itoa(d.Revision)
 	payload, hash := d.Definition.Manifest(d.ID, version)
 	// Загрузка выполняется вне транзакции; CAS ниже оставляет возможный orphan для отдельного cleanup.
-	if err := s.objects.PutImmutable(ctx, d.ID.String()+"/"+version+"/suite.json", payload); err != nil {
+	if uploadErr := s.objects.PutImmutable(ctx, d.ID.String()+"/"+version+"/suite.json", payload); uploadErr != nil {
 		return domain.PublishedSuite{}, apperror.New("SUITE_STORAGE_UNAVAILABLE", "suite storage unavailable", http.StatusServiceUnavailable)
 	}
 	var published domain.PublishedSuite
 	err = s.repository.WithinTransaction(ctx, func(tx repository.Repository) error {
-		current, err := tx.GetSuiteDraft(ctx, id, true)
-		if err != nil {
-			return err
+		current, currentErr := tx.GetSuiteDraft(ctx, id, true)
+		if currentErr != nil {
+			return currentErr
 		}
 		if current.Revision != revision {
 			return suiteConflict()
 		}
 		if current.PublishedVersionID != nil {
-			existing, err := tx.GetPublishedSuite(ctx, d.TaskID, *current.PublishedVersionID)
-			if err != nil {
-				return err
+			existing, existingErr := tx.GetPublishedSuite(ctx, d.TaskID, *current.PublishedVersionID)
+			if existingErr != nil {
+				return existingErr
 			}
 			if existing == nil {
 				return fmt.Errorf("published suite missing")
 			}
 			published = *existing
+
 			return nil
 		}
-		task, err := tx.GetTask(ctx, d.TaskID, true)
-		if err != nil {
-			return err
+		task, taskErr := tx.GetTask(ctx, d.TaskID, true)
+		if taskErr != nil {
+			return taskErr
 		}
 		if task.Status == domain.TaskStatusArchived || task.CurrentVersionID == nil || *task.CurrentVersionID != d.BaseVersionID {
 			return suiteConflict()
 		}
-		old, err := tx.GetTaskVersion(ctx, d.TaskID, d.BaseVersionID)
-		if err != nil {
-			return err
+		old, versionErr := tx.GetTaskVersion(ctx, d.TaskID, d.BaseVersionID)
+		if versionErr != nil {
+			return versionErr
 		}
 		input := domain.TaskInput{TopicID: old.TopicID, Title: old.Title, Statement: old.Statement, TaskType: old.TaskType, Difficulty: old.Difficulty, EstimatedMinutes: old.EstimatedMinutes, Tags: old.Tags, Examples: old.Examples, Constraints: old.Constraints, Source: old.Source}
 		next := buildVersion(d.TaskID, uuid.New(), old.VersionNumber+1, input, actor)
-		if err := tx.InsertTaskVersion(ctx, next); err != nil {
-			return err
+		if insertErr := tx.InsertTaskVersion(ctx, next); insertErr != nil {
+			return insertErr
 		}
 		if hasExtendedContent(next) {
-			if err := tx.InsertTaskContent(ctx, next); err != nil {
-				return err
+			if contentErr := tx.InsertTaskContent(ctx, next); contentErr != nil {
+				return contentErr
 			}
 		}
 		published = domain.PublishedSuite{TaskID: d.TaskID, TaskVersionID: next.ID, Reference: domain.SuiteReference{ID: d.ID, Version: version, ChecksumSHA256: hash}, Definition: d.Definition}
-		if err := tx.InsertPublishedSuite(ctx, published); err != nil {
-			return err
+		if publishedErr := tx.InsertPublishedSuite(ctx, published); publishedErr != nil {
+			return publishedErr
 		}
-		if err := tx.SetCurrentTaskVersion(ctx, d.TaskID, next.ID, actor); err != nil {
-			return err
+		if currentVersionErr := tx.SetCurrentTaskVersion(ctx, d.TaskID, next.ID, actor); currentVersionErr != nil {
+			return currentVersionErr
 		}
-		ok, err := tx.MarkSuitePublished(ctx, d.ID, revision, next.ID)
-		if err != nil {
-			return err
+		ok, markErr := tx.MarkSuitePublished(ctx, d.ID, revision, next.ID)
+		if markErr != nil {
+			return markErr
 		}
 		if !ok {
 			return suiteConflict()
 		}
+
 		return nil
 	})
+
 	return published, err
 }
 func (s *SuiteService) published(ctx context.Context, taskID, versionID uuid.UUID) (domain.PublishedSuite, error) {
@@ -192,5 +201,6 @@ func (s *SuiteService) published(ctx context.Context, taskID, versionID uuid.UUI
 	if p == nil {
 		return domain.PublishedSuite{}, fmt.Errorf("published suite missing")
 	}
+
 	return *p, nil
 }

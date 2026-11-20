@@ -205,16 +205,17 @@ func (r *Postgres) hydrateCandidateContent(ctx context.Context, candidates map[u
 	for rows.Next() {
 		var id uuid.UUID
 		var value string
-		if err := rows.Scan(&id, &value); err != nil {
+		if scanErr := rows.Scan(&id, &value); scanErr != nil {
 			rows.Close()
-			return fmt.Errorf("scan candidate tag: %w", err)
+
+			return fmt.Errorf("scan candidate tag: %w", scanErr)
 		}
 		candidates[id].Tags = append(candidates[id].Tags, value)
 	}
-	if err := rows.Err(); err != nil {
+	if rowsErr := rows.Err(); rowsErr != nil {
 		rows.Close()
 
-		return fmt.Errorf("iterate candidate tags: %w", err)
+		return fmt.Errorf("iterate candidate tags: %w", rowsErr)
 	}
 	rows.Close()
 	rows, err = r.query.Query(ctx, `SELECT candidate_id,input,output,explanation FROM task_candidate_examples WHERE candidate_id=ANY($1) ORDER BY candidate_id,position`, ids)
@@ -224,16 +225,17 @@ func (r *Postgres) hydrateCandidateContent(ctx context.Context, candidates map[u
 	for rows.Next() {
 		var id uuid.UUID
 		var value domain.TaskExample
-		if err := rows.Scan(&id, &value.Input, &value.Output, &value.Explanation); err != nil {
+		if scanErr := rows.Scan(&id, &value.Input, &value.Output, &value.Explanation); scanErr != nil {
 			rows.Close()
-			return fmt.Errorf("scan candidate example: %w", err)
+
+			return fmt.Errorf("scan candidate example: %w", scanErr)
 		}
 		candidates[id].Examples = append(candidates[id].Examples, value)
 	}
-	if err := rows.Err(); err != nil {
+	if rowsErr := rows.Err(); rowsErr != nil {
 		rows.Close()
 
-		return fmt.Errorf("iterate candidate examples: %w", err)
+		return fmt.Errorf("iterate candidate examples: %w", rowsErr)
 	}
 	rows.Close()
 	rows, err = r.query.Query(ctx, `SELECT candidate_id,value FROM task_candidate_constraints WHERE candidate_id=ANY($1) ORDER BY candidate_id,position`, ids)

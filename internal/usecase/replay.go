@@ -27,13 +27,13 @@ func (s *CodeSubmissionService) Replay(ctx context.Context, id, expected, actor 
 	}
 	var next domain.CodeSubmission
 	err = s.repository.WithinTransaction(ctx, func(tx repository.Repository) error {
-		own, total, err := tx.CodeAdmissionUsage(ctx, snapshot.UserID)
-		if err != nil {
-			return err
+		own, total, usageErr := tx.CodeAdmissionUsage(ctx, snapshot.UserID)
+		if usageErr != nil {
+			return usageErr
 		}
-		current, err := tx.GetCodeSubmissionForUpdate(ctx, id)
-		if err != nil {
-			return err
+		current, currentErr := tx.GetCodeSubmissionForUpdate(ctx, id)
+		if currentErr != nil {
+			return currentErr
 		}
 		now := time.Now().UTC()
 		eligible := current.Status == domain.CodeSubmissionStatusQueued && !now.Before(current.NextAttemptAt)
@@ -46,20 +46,20 @@ func (s *CodeSubmissionService) Replay(ctx context.Context, id, expected, actor 
 		if current.Status != domain.CodeSubmissionStatusQueued && (own >= s.policy.MaxPendingPerUser || total >= s.policy.MaxPendingTotal) {
 			return apperror.New(apperror.RateLimited, "submission capacity unavailable", http.StatusTooManyRequests)
 		}
-		task, err := tx.GetTask(ctx, current.TaskID, true)
-		if err != nil {
-			return err
+		task, taskErr := tx.GetTask(ctx, current.TaskID, true)
+		if taskErr != nil {
+			return taskErr
 		}
 		if task.Status != domain.TaskStatusPublished {
 			return apperror.New(apperror.TaskNotAvailable, "task not available", http.StatusConflict)
 		}
-		version, err := tx.GetTaskVersion(ctx, current.TaskID, current.TaskVersionID)
-		if err != nil {
-			return err
+		version, versionErr := tx.GetTaskVersion(ctx, current.TaskID, current.TaskVersionID)
+		if versionErr != nil {
+			return versionErr
 		}
-		suite, err := executionSuite(ctx, tx, current.TaskID, current.TaskVersionID, current.RunMode, current.Language)
-		if err != nil {
-			return err
+		suite, suiteErr := executionSuite(ctx, tx, current.TaskID, current.TaskVersionID, current.RunMode, current.Language)
+		if suiteErr != nil {
+			return suiteErr
 		}
 		next = current
 		next.ExecutionID = uuid.New()
@@ -73,23 +73,25 @@ func (s *CodeSubmissionService) Replay(ctx context.Context, id, expected, actor 
 		next.Compilation = nil
 		next.Execution = nil
 		next.UpdatedAt = now
-		changed, err := tx.ReplayCodeSubmission(ctx, id, expected, next.ExecutionID, actor, now, next.NextAttemptAt)
-		if err != nil {
-			return err
+		changed, replayErr := tx.ReplayCodeSubmission(ctx, id, expected, next.ExecutionID, actor, now, next.NextAttemptAt)
+		if replayErr != nil {
+			return replayErr
 		}
 		if !changed {
 			return apperror.New("REPLAY_CONFLICT", "attempt changed", http.StatusConflict)
 		}
 		request := s.buildRunRequest(next, openExamples(version.Examples), now)
 		applyExecutionSuite(&request, suite)
-		payload, err := execution.EncodeRunRequest(request)
-		if err != nil {
-			return err
+		payload, encodeErr := execution.EncodeRunRequest(request)
+		if encodeErr != nil {
+			return encodeErr
 		}
+
 		return tx.InsertOutboxMessage(ctx, domain.OutboxMessage{ID: uuid.New(), AggregateID: id, Topic: s.policy.RequestsTopic, MessageKey: id.String(), Payload: payload, AvailableAt: now, CreatedAt: now})
 	})
 	if err == nil {
 		s.metrics.Attempt(observability.ReplayAttempt)
 	}
+
 	return next, err
 }

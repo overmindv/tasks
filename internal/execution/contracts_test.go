@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const privateVisibility = "private"
+
 // TestRunRequestContractRoundTrip проверяет обязательные поля JSON-запроса sandbox.
 func TestRunRequestContractRoundTrip(t *testing.T) {
 	t.Parallel()
@@ -137,6 +139,8 @@ func validRunRequest() RunRequest {
 }
 
 func TestSandboxCannotSetSampleVisibility(t *testing.T) {
+	t.Parallel()
+
 	payload := []byte(`{"schema_version":"sandbox.run.result.v1","submission_id":"submission","attempt_id":"attempt","status":"ok","created_at":"2026-08-31T10:00:00Z","cases":[{"index":0,"status":"ok","sample_visible":true,"stdout":"secret"}]}`)
 	if _, err := DecodeRunResult(payload); err == nil {
 		t.Fatal("sandbox forged public visibility marker")
@@ -144,6 +148,8 @@ func TestSandboxCannotSetSampleVisibility(t *testing.T) {
 }
 
 func TestDecodePrivateCaseVisibility(t *testing.T) {
+	t.Parallel()
+
 	payload, err := os.ReadFile("../../tests/fixtures/execution-contract/execution.result.json")
 	if err != nil {
 		t.Fatal(err)
@@ -152,13 +158,13 @@ func TestDecodePrivateCaseVisibility(t *testing.T) {
 	if err = json.Unmarshal(payload, &wire); err != nil {
 		t.Fatal(err)
 	}
-	wire["diagnostics_visibility"] = "private"
+	wire["diagnostics_visibility"] = privateVisibility
 	for _, c := range wire["cases"].([]any) {
-		c.(map[string]any)["diagnostics_visibility"] = "private"
+		c.(map[string]any)["diagnostics_visibility"] = privateVisibility
 	}
 	payload, _ = json.Marshal(wire)
 	got, err := DecodeRunResult(payload)
-	if err != nil || got.DiagnosticsVisibility != "private" || got.Cases[0].DiagnosticsVisibility != "private" {
+	if err != nil || got.DiagnosticsVisibility != privateVisibility || got.Cases[0].DiagnosticsVisibility != privateVisibility {
 		t.Fatalf("private result contract: %+v %v", got, err)
 	}
 }

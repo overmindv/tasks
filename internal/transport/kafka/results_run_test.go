@@ -28,21 +28,25 @@ type orderedResultClient struct {
 func (f *orderedResultClient) PollRecords(ctx context.Context, _ int) kgo.Fetches {
 	if f.next == len(f.records) {
 		f.cancel()
+
 		return nil
 	}
 	r := f.records[f.next]
 	f.next++
 	f.blocked = true
 	f.pending = true
+
 	return kgo.Fetches{{Topics: []kgo.FetchTopic{{Topic: r.Topic, Partitions: []kgo.FetchPartition{{Partition: r.Partition, Records: []*kgo.Record{r}}}}}}}
 }
 func (f *orderedResultClient) CommitRecords(_ context.Context, rs ...*kgo.Record) error {
 	if f.commitFailures > 0 {
 		f.commitFailures--
+
 		return errors.New("coordinator unavailable")
 	}
 	f.commits = append(f.commits, rs[0].Offset)
 	f.pending = false
+
 	return nil
 }
 func (f *orderedResultClient) AllowRebalance() {
@@ -63,9 +67,11 @@ func (f *retryResultHandler) HandleRunResult(_ context.Context, m usecase.Execut
 	f.offsets = append(f.offsets, m.Offset)
 	if f.failures > 0 {
 		f.failures--
+
 		return errors.New("database unavailable")
 	}
 	f.saved = append(f.saved, m.Offset)
+
 	return nil
 }
 
@@ -77,6 +83,8 @@ func resultRecords() []*kgo.Record {
 }
 
 func TestResultConsumerRetriesBeforePollingAhead(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name                       string
 		dbFailures, commitFailures int
@@ -86,6 +94,8 @@ func TestResultConsumerRetriesBeforePollingAhead(t *testing.T) {
 		{"commit failure", 0, 1, []int64{10, 11}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			client := &orderedResultClient{records: resultRecords(), cancel: cancel, commitFailures: tc.commitFailures}
@@ -108,6 +118,8 @@ func TestResultConsumerRetriesBeforePollingAhead(t *testing.T) {
 }
 
 func TestResultConsumerExhaustionReleasesForRedelivery(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name                       string
 		dbFailures, commitFailures int
@@ -116,6 +128,8 @@ func TestResultConsumerExhaustionReleasesForRedelivery(t *testing.T) {
 		{"commit unavailable", 0, 100},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			client := &orderedResultClient{records: resultRecords(), cancel: cancel, commitFailures: tc.commitFailures}
@@ -144,6 +158,8 @@ func TestResultConsumerExhaustionReleasesForRedelivery(t *testing.T) {
 }
 
 func TestResultConsumerCancellationDuringRetry(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 	client := &orderedResultClient{records: resultRecords(), cancel: cancel}
@@ -157,6 +173,8 @@ func TestResultConsumerCancellationDuringRetry(t *testing.T) {
 }
 
 func TestResultConsumerRetriesRejectedInbox(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	records := resultRecords()
@@ -182,6 +200,7 @@ func (f *retryRejectHandler) RejectResult(context.Context, usecase.ExecutionMess
 	if f.rejectAttempts == 1 {
 		return errors.New("database unavailable")
 	}
+
 	return nil
 }
 
@@ -193,9 +212,12 @@ func (f *mixedFetchClient) PollRecords(ctx context.Context, limit int) kgo.Fetch
 	if len(fetches) > 0 {
 		fetches[0].Topics[0].Partitions = append(fetches[0].Topics[0].Partitions, kgo.FetchPartition{Partition: 1, Err: errors.New("partition unavailable")})
 	}
+
 	return fetches
 }
 func TestResultConsumerPreservesRecordsAlongsideFetchErrors(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	client := &mixedFetchClient{orderedResultClient{records: resultRecords(), cancel: cancel}}

@@ -174,8 +174,8 @@ func TestCodeSubmissionServiceUsesTransactionalOutboxAndIdempotency(t *testing.T
 		t.Errorf("message key = %q, want submission_id %s", repo.outbox[0].MessageKey, created.ID)
 	}
 	var request execution.RunRequest
-	if err := json.Unmarshal(repo.outbox[0].Payload, &request); err != nil {
-		t.Fatalf("decode outbox request: %v", err)
+	if decodeErr := json.Unmarshal(repo.outbox[0].Payload, &request); decodeErr != nil {
+		t.Fatalf("decode outbox request: %v", decodeErr)
 	}
 	if request.SubmissionID != created.ID.String() || request.AttemptID != created.ExecutionID.String() ||
 		request.TraceID != created.CorrelationID.String() ||
@@ -837,5 +837,6 @@ func (r *codeSubmissionMemoryRepository) CodeAdmissionUsage(_ context.Context, u
 			}
 		}
 	}
+
 	return
 }

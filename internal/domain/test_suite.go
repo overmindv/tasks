@@ -89,11 +89,13 @@ func ValidateSuite(s SuiteDefinition, requireHidden bool) error {
 	if requireHidden && !hidden {
 		return errors.New("graded suite requires hidden cases")
 	}
+
 	return nil
 }
 func (s SuiteDefinition) Checksum() string {
 	payload, _ := json.Marshal(s)
 	sum := sha256.Sum256(payload)
+
 	return hex.EncodeToString(sum[:])
 }
 
@@ -112,5 +114,6 @@ func (s SuiteDefinition) Manifest(id uuid.UUID, version string) ([]byte, string)
 	}
 	payload, _ := json.Marshal(InputManifest{SchemaVersion: "sandbox.inputs.v1", SuiteID: id.String(), Version: version, Inputs: inputs})
 	sum := sha256.Sum256(payload)
+
 	return payload, hex.EncodeToString(sum[:])
 }

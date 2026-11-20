@@ -42,6 +42,7 @@ func (q outboxQueue) table() string {
 	if q.learning {
 		return "learning_outcome_outbox"
 	}
+
 	return "code_submission_outbox"
 }
 

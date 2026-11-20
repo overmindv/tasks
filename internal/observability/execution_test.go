@@ -84,6 +84,7 @@ func TestFailedQueueSampleKeepsLastGoodAges(t *testing.T) {
 		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 2*time.Second {
 			t.Error("queue sample missing a deadline")
 		}
+
 		return 2, 7, nil
 	}))
 	m.sampleQueue(t.Context(), queueSource(func(context.Context) (float64, float64, error) {

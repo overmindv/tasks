@@ -8,6 +8,8 @@ import (
 )
 
 func TestProgressAccumulatorCountsFirstAcceptedTaskOnce(t *testing.T) {
+	t.Parallel()
+
 	now := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
 	firstTask, secondTask := uuid.New(), uuid.New()
 	progress := NewProgressAccumulator(uuid.New(), true, now)
@@ -17,7 +19,7 @@ func TestProgressAccumulatorCountsFirstAcceptedTaskOnce(t *testing.T) {
 	progress.Add(GradedAttempt{TaskID: secondTask, Difficulty: "medium", Verdict: "accepted", OccurredAt: now})
 	progress.Add(GradedAttempt{TaskID: secondTask, Difficulty: "medium", Verdict: "infrastructure_error", OccurredAt: now})
 	progress.Add(GradedAttempt{TaskID: secondTask, Difficulty: "medium", Verdict: "checker_error", OccurredAt: now})
-	progress.Add(GradedAttempt{TaskID: secondTask, Difficulty: "medium", Verdict: "cancelled", OccurredAt: now})
+	progress.Add(GradedAttempt{TaskID: secondTask, Difficulty: "medium", Verdict: "canceled", OccurredAt: now})
 	got := progress.Summary()
 	if got.Attempts != 4 || got.AcceptedAttempts != 3 || got.SolvedTasks != 2 || got.Score != 30 || got.AccuracyPercent != 75 {
 		t.Fatalf("unexpected summary: %+v", got)
@@ -31,6 +33,8 @@ func TestProgressAccumulatorCountsFirstAcceptedTaskOnce(t *testing.T) {
 }
 
 func TestProgressAccumulatorEmptyAndOldActivity(t *testing.T) {
+	t.Parallel()
+
 	now := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)
 	progress := NewProgressAccumulator(uuid.New(), false, now)
 	progress.Add(GradedAttempt{TaskID: uuid.New(), Difficulty: "hard", Verdict: "accepted", OccurredAt: now.AddDate(0, 0, -35)})

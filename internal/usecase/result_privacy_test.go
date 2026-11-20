@@ -11,6 +11,8 @@ import (
 )
 
 func TestRunnerFailureDetailsNeverPersist(t *testing.T) {
+	t.Parallel()
+
 	repo, svc, s := fencingSubmission(t)
 	r := fencingResult(s, "invalid_request")
 	r.Cases = nil
@@ -33,6 +35,8 @@ func TestRunnerFailureDetailsNeverPersist(t *testing.T) {
 }
 
 func TestAcceptedSampleReceivesTrustedVisibility(t *testing.T) {
+	t.Parallel()
+
 	repo, svc, s := fencingSubmission(t)
 	if err := svc.HandleRunResult(context.Background(), fencingMeta(1), fencingResult(s, "ok")); err != nil {
 		t.Fatal(err)

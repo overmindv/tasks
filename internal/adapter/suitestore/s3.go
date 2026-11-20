@@ -27,6 +27,7 @@ func New(c Config) (*Store, error) {
 		return nil, errors.New("incomplete suite storage configuration")
 	}
 	client := s3.New(s3.Options{Region: c.Region, BaseEndpoint: aws.String(c.Endpoint), UsePathStyle: true, Credentials: credentials.NewStaticCredentialsProvider(c.AccessKey, c.SecretKey, ""), HTTPClient: &http.Client{Timeout: 15 * time.Second}})
+
 	return &Store{client: client, bucket: c.Bucket, prefix: strings.Trim(c.Prefix, "/")}, nil
 }
 func (s *Store) PutImmutable(ctx context.Context, key string, payload []byte) error {
@@ -50,5 +51,6 @@ func (s *Store) PutImmutable(ctx context.Context, key string, payload []byte) er
 	if err != nil || !bytes.Equal(data, payload) {
 		return errors.New("immutable suite conflict")
 	}
+
 	return nil
 }

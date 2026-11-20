@@ -11,6 +11,8 @@ import (
 	"github.com/overmindv/tasks/internal/repository"
 )
 
+const importedStatus = "imported"
+
 type candidateMemoryRepository struct {
 	repository.Repository
 	candidate     domain.TaskCandidate
@@ -170,6 +172,8 @@ func TestCandidateApproveIsAtomicAndIdempotent(t *testing.T) {
 // TestCandidateImportAssociatesProblemList проверяет привязку кандидатов
 // к problem-list при импорте и членство опубликованной задачи при approve.
 func TestCandidateImportAssociatesProblemList(t *testing.T) {
+	t.Parallel()
+
 	repo := &candidateMemoryRepository{}
 	service := NewCandidateService(repo)
 
@@ -184,7 +188,7 @@ func TestCandidateImportAssociatesProblemList(t *testing.T) {
 			},
 		},
 	})
-	if len(results) != 1 || results[0].Status != "imported" {
+	if len(results) != 1 || results[0].Status != importedStatus {
 		t.Fatalf("unexpected import results: %#v", results)
 	}
 	if repo.candidate.ProblemListID == nil || *repo.candidate.ProblemListID != repo.problemListID {
@@ -206,6 +210,8 @@ func TestCandidateImportAssociatesProblemList(t *testing.T) {
 
 // TestCandidateImportSkipsProblemListWithoutRef проверяет импорт без ссылки на список.
 func TestCandidateImportSkipsProblemListWithoutRef(t *testing.T) {
+	t.Parallel()
+
 	repo := &candidateMemoryRepository{}
 	service := NewCandidateService(repo)
 
@@ -217,7 +223,7 @@ func TestCandidateImportSkipsProblemListWithoutRef(t *testing.T) {
 			Statement: "Найдите сумму двух чисел", Difficulty: domain.DifficultyEasy,
 		},
 	})
-	if len(results) != 1 || results[0].Status != "imported" {
+	if len(results) != 1 || results[0].Status != importedStatus {
 		t.Fatalf("unexpected import results: %#v", results)
 	}
 	if repo.candidate.ProblemListID != nil || repo.problemListID != uuid.Nil {
