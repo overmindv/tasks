@@ -34,10 +34,12 @@ func (s *ProgressService) Get(ctx context.Context, actorID, userID uuid.UUID) (d
 	progress := domain.NewProgressAccumulator(userID, public, time.Now())
 	if err := s.store.VisitGradedAttempts(ctx, userID, func(attempt domain.GradedAttempt) error {
 		progress.Add(attempt)
+
 		return nil
 	}); err != nil {
 		return domain.ProgressSummary{}, err
 	}
+
 	return progress.Summary(), nil
 }
 

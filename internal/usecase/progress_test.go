@@ -21,6 +21,7 @@ func (f *fakeProgressStore) GetProgressVisibility(_ context.Context, userID uuid
 }
 func (f *fakeProgressStore) SetProgressVisibility(_ context.Context, userID uuid.UUID, public bool) error {
 	f.public[userID] = public
+
 	return nil
 }
 func (f *fakeProgressStore) VisitGradedAttempts(_ context.Context, _ uuid.UUID, visit func(domain.GradedAttempt) error) error {
@@ -30,6 +31,7 @@ func (f *fakeProgressStore) VisitGradedAttempts(_ context.Context, _ uuid.UUID, 
 			return err
 		}
 	}
+
 	return nil
 }
 func (f *fakeProgressStore) ListRatedUsers(_ context.Context, _ *[]uuid.UUID, _, _ int) ([]domain.RatedUser, error) {
@@ -37,6 +39,8 @@ func (f *fakeProgressStore) ListRatedUsers(_ context.Context, _ *[]uuid.UUID, _,
 }
 
 func TestProgressServicePrivateThenPublic(t *testing.T) {
+	t.Parallel()
+
 	owner, other := uuid.New(), uuid.New()
 	store := &fakeProgressStore{public: map[uuid.UUID]bool{}, attempts: []domain.GradedAttempt{{TaskID: uuid.New(), Difficulty: "easy", Verdict: "accepted", OccurredAt: time.Now()}}}
 	service := NewProgressService(store)
@@ -47,8 +51,8 @@ func TestProgressServicePrivateThenPublic(t *testing.T) {
 	if err != nil || mine.Score != 10 || mine.Public {
 		t.Fatalf("owner summary=%+v err=%v", mine, err)
 	}
-	if err := service.SetVisibility(context.Background(), owner, true); err != nil {
-		t.Fatal(err)
+	if visibilityErr := service.SetVisibility(context.Background(), owner, true); visibilityErr != nil {
+		t.Fatal(visibilityErr)
 	}
 	peer, err := service.Get(context.Background(), other, owner)
 	if err != nil || !peer.Public || peer.Score != 10 {
