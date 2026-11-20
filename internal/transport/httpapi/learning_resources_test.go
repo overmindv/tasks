@@ -11,6 +11,8 @@ import (
 )
 
 func TestResourceRoutesRequireServiceToken(t *testing.T) {
+	t.Parallel()
+
 	const endpoint = "/v1/internal/resources/snapshot"
 	token := strings.Repeat("x", 32)
 	router := http.NewServeMux()
@@ -50,6 +52,8 @@ func TestResourceRoutesRequireServiceToken(t *testing.T) {
 }
 
 func TestResourceQueryRejectsInvalidParameters(t *testing.T) {
+	t.Parallel()
+
 	for _, raw := range []string{
 		"watermark=-1", "watermark=02", "watermark=9223372036854775808",
 		"limit=0", "limit=101", "limit=1&limit=2", "offset=2", "cursor=%",
@@ -62,6 +66,8 @@ func TestResourceQueryRejectsInvalidParameters(t *testing.T) {
 }
 
 func TestTaskEstimateDistinguishesOmissionAndNull(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		body    string
 		set     bool

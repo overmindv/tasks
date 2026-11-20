@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	postgresadapter "github.com/overmindv/tasks/internal/adapter/postgres"
@@ -39,7 +40,8 @@ func main() {
 	if address == "" {
 		panic("PROGRESS_FIXTURE_ADDRESS is required")
 	}
-	if err := http.ListenAndServe(address, router); err != nil {
+	server := &http.Server{Addr: address, Handler: router, ReadHeaderTimeout: 5 * time.Second}
+	if err := server.ListenAndServe(); err != nil {
 		panic(fmt.Errorf("serve progress fixture: %w", err))
 	}
 }
@@ -65,5 +67,6 @@ func seed(pool *pgxpool.Pool) error {
 		 ('30000000-0000-4000-8000-000000000004','00000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000004','hash','accepted');
 		INSERT INTO practice_progress_visibility (user_id, is_public) VALUES ('00000000-0000-4000-8000-000000000004', true);
 	`)
+
 	return err
 }

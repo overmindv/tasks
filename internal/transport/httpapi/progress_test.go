@@ -24,10 +24,12 @@ func (m *progressMemory) GetProgressVisibility(_ context.Context, id uuid.UUID) 
 }
 func (m *progressMemory) SetProgressVisibility(_ context.Context, id uuid.UUID, value bool) error {
 	m.visible[id] = value
+
 	return nil
 }
 func (m *progressMemory) VisitGradedAttempts(_ context.Context, _ uuid.UUID, _ func(domain.GradedAttempt) error) error {
 	m.visited++
+
 	return nil
 }
 func (m *progressMemory) ListRatedUsers(_ context.Context, _ *[]uuid.UUID, _, _ int) ([]domain.RatedUser, error) {
@@ -35,6 +37,8 @@ func (m *progressMemory) ListRatedUsers(_ context.Context, _ *[]uuid.UUID, _, _ 
 }
 
 func TestProgressHTTPRequiresActorAndKeepsPeerPrivate(t *testing.T) {
+	t.Parallel()
+
 	store := &progressMemory{visible: make(map[uuid.UUID]bool)}
 	mux := http.NewServeMux()
 	RegisterProgress(mux, usecase.NewProgressService(store), slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -47,6 +51,7 @@ func TestProgressHTTPRequiresActorAndKeepsPeerPrivate(t *testing.T) {
 		}
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, r)
+
 		return w
 	}
 	if got := request(http.MethodGet, "/v1/me/practice-progress", uuid.Nil, nil); got.Code != http.StatusUnauthorized {

@@ -41,6 +41,7 @@ func RegisterResources(router Router, service *usecase.ResourceService, token st
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			if !resourceAuthorized(r.Header.Values("Authorization"), expected) {
 				writeJSON(w, http.StatusForbidden, apperror.New(apperror.PermissionDenied, "доступ запрещен", http.StatusForbidden))
+
 				return
 			}
 			timed.ServeHTTP(w, r)
@@ -149,6 +150,7 @@ func (h resourceRoutes) snapshot(w http.ResponseWriter, r *http.Request) {
 	query, err := parseResourceQuery(r.URL.RawQuery, "cursor")
 	if err != nil {
 		h.writeError(w, err)
+
 		return
 	}
 	var cursor uuid.UUID
@@ -156,12 +158,14 @@ func (h resourceRoutes) snapshot(w http.ResponseWriter, r *http.Request) {
 		cursor, err = uuid.Parse(values[0])
 		if err != nil || cursor == uuid.Nil || cursor.String() != values[0] {
 			h.writeError(w, usecase.ErrInvalidResourcePage)
+
 			return
 		}
 	}
 	page, err := h.service.Snapshot(r.Context(), query.watermark, cursor, query.limit)
 	if err != nil {
 		h.writeError(w, err)
+
 		return
 	}
 	writeJSON(w, http.StatusOK, resourceSnapshotResponse{
@@ -173,6 +177,7 @@ func (h resourceRoutes) changes(w http.ResponseWriter, r *http.Request) {
 	query, err := parseResourceQuery(r.URL.RawQuery, "after")
 	if err != nil {
 		h.writeError(w, err)
+
 		return
 	}
 	var after int64
@@ -180,12 +185,14 @@ func (h resourceRoutes) changes(w http.ResponseWriter, r *http.Request) {
 		after, err = resourceRevision(values[0])
 		if err != nil {
 			h.writeError(w, err)
+
 			return
 		}
 	}
 	page, err := h.service.Changes(r.Context(), query.watermark, after, query.limit)
 	if err != nil {
 		h.writeError(w, err)
+
 		return
 	}
 	writeJSON(w, http.StatusOK, resourceChangePageResponse{
@@ -207,6 +214,7 @@ func (h resourceRoutes) availability(w http.ResponseWriter, r *http.Request) {
 	available, err := h.service.Available(r.Context(), keys)
 	if err != nil {
 		h.writeError(w, err)
+
 		return
 	}
 	result := make([]resourceVersionDTO, 0, len(available))
@@ -269,6 +277,7 @@ func resourceRevision(raw string) (int64, error) {
 func (h resourceRoutes) writeError(w http.ResponseWriter, err error) {
 	if errors.Is(err, usecase.ErrInvalidResourcePage) {
 		writeJSON(w, http.StatusBadRequest, apperror.New(apperror.ValidationError, "некорректный запрос каталога", http.StatusBadRequest))
+
 		return
 	}
 	h.logger.Error("не удалось прочитать каталог задач", "error", err)
