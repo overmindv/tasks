@@ -9,6 +9,8 @@ import (
 )
 
 func TestReplayRequiresAdmin(t *testing.T) {
+	t.Parallel()
+
 	for _, role := range []string{"", "user"} {
 		req := httptest.NewRequest(http.MethodPost, "/v1/admin/code-submissions/"+uuid.NewString()+"/replay", nil)
 		if role != "" {
