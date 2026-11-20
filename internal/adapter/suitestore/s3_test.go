@@ -9,6 +9,8 @@ import (
 )
 
 func TestImmutableUpload(t *testing.T) {
+	t.Parallel()
+
 	var saved []byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/private/suites/id/1/suite.json" {
@@ -16,6 +18,7 @@ func TestImmutableUpload(t *testing.T) {
 		}
 		if r.Method == http.MethodGet {
 			_, _ = w.Write(saved)
+
 			return
 		}
 		if r.Header.Get("If-None-Match") != "*" {
@@ -23,6 +26,7 @@ func TestImmutableUpload(t *testing.T) {
 		}
 		if saved != nil {
 			w.WriteHeader(412)
+
 			return
 		}
 		saved, _ = io.ReadAll(r.Body)

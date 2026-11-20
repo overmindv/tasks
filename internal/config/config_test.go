@@ -44,6 +44,8 @@ func TestConfigValidate(t *testing.T) {
 }
 
 // TestEnvListNormalizesBrokers проверяет очистку и дедупликацию comma-separated списка.
+//
+//nolint:paralleltest // t.Setenv изменяет process-wide environment
 func TestEnvListNormalizesBrokers(t *testing.T) {
 	t.Setenv("TEST_KAFKA_BROKERS", " kafka-a:9092, kafka-b:9092,kafka-a:9092 ")
 	items := envList("TEST_KAFKA_BROKERS", "unused:9092")
@@ -52,6 +54,7 @@ func TestEnvListNormalizesBrokers(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // t.Setenv изменяет process-wide environment и subtests выполняются последовательно
 func TestAdmissionConfigBounds(t *testing.T) {
 	t.Setenv("TASK_HUNTER_INGEST_TOKEN", "test")
 	for _, key := range []string{"CODE_ADMISSION_MAX_PER_USER", "CODE_ADMISSION_MAX_TOTAL", "CODE_ADMISSION_RETRY_SECONDS"} {
@@ -71,6 +74,7 @@ func TestAdmissionConfigBounds(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // t.Setenv изменяет process-wide environment
 func TestLearningOutcomeConfig(t *testing.T) {
 	t.Setenv("TASK_HUNTER_INGEST_TOKEN", "test")
 	t.Setenv("TASKS_LEARNING_OUTCOMES_ENABLED", "")
@@ -79,7 +83,7 @@ func TestLearningOutcomeConfig(t *testing.T) {
 		t.Fatal("learning outcomes must be disabled by default:", err)
 	}
 	t.Setenv("TASKS_LEARNING_OUTCOMES_ENABLED", "yes")
-	if _, err := Load(); err == nil {
+	if _, loadErr := Load(); loadErr == nil {
 		t.Fatal("invalid learning outcome setting accepted")
 	}
 	t.Setenv("TASKS_LEARNING_OUTCOMES_ENABLED", "true")

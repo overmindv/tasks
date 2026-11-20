@@ -39,9 +39,9 @@ func Build(app *parker.App) error {
 			return errors.New("TASKS_EXECUTION_METRICS_TOKEN must differ from TASKS_RESOURCE_TOKEN")
 		}
 		executionMetrics = observability.NewExecution()
-		handler, err := executionMetrics.Handler(cfg.ExecutionMetricsToken)
-		if err != nil {
-			return err
+		handler, handlerErr := executionMetrics.Handler(cfg.ExecutionMetricsToken)
+		if handlerErr != nil {
+			return handlerErr
 		}
 		app.HTTP().Handle(http.MethodGet+" "+observability.ExecutionMetricsPath, handler)
 	}
@@ -109,8 +109,8 @@ func Build(app *parker.App) error {
 		cfg.TaskHunterIngestToken,
 	)
 	httpapi.RegisterProgress(app.HTTP(), progressService, app.Logger())
-	if err := httpapi.RegisterResources(app.HTTP(), usecase.NewResourceService(store, languageVersions), cfg.ResourceToken, app.Logger()); err != nil {
-		return err
+	if registerErr := httpapi.RegisterResources(app.HTTP(), usecase.NewResourceService(store, languageVersions), cfg.ResourceToken, app.Logger()); registerErr != nil {
+		return registerErr
 	}
 	var suiteObjects usecase.SuiteObjectStore
 	if os.Getenv("TASKS_SUITE_S3_ENDPOINT") != "" || os.Getenv("TASKS_SUITE_S3_BUCKET") != "" || os.Getenv("TASKS_SUITE_S3_ACCESS_KEY_ID") != "" || os.Getenv("TASKS_SUITE_S3_SECRET_ACCESS_KEY") != "" {
@@ -137,6 +137,7 @@ func Build(app *parker.App) error {
 	}
 	app.AddRunnable("kafka-results", func(ctx context.Context) error {
 		defer consumerClient.Close()
+
 		return consumer.Run(ctx)
 	})
 	app.AddRunnable("code-submission-reaper", func(ctx context.Context) error {
@@ -163,6 +164,7 @@ func runReaper(ctx context.Context, service *usecase.CodeSubmissionService, inte
 				return nil
 			case <-time.After(interval):
 			}
+
 			continue
 		}
 		select {
