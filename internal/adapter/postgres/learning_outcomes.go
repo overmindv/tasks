@@ -35,6 +35,7 @@ func (r *Postgres) FirstLearningOutcome(ctx context.Context, learner, task, subm
 	if err != nil {
 		return false, fmt.Errorf("look up graded task history: %w", err)
 	}
+
 	return first, nil
 }
 
@@ -53,5 +54,6 @@ func (r *Postgres) InsertLearningOutcome(ctx context.Context, event domain.Learn
 	if err != nil {
 		return fmt.Errorf("insert learning outcome: %w", err)
 	}
+
 	return nil
 }

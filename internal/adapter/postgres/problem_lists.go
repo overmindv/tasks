@@ -84,11 +84,11 @@ func (r *Postgres) GetProblemListDetail(ctx context.Context, id uuid.UUID) (doma
 	if err != nil {
 		return domain.ProblemListDetail{}, notFound(err, apperror.ProblemListNotFound, "список задач не найден")
 	}
-	if err := r.query.QueryRow(ctx, `SELECT count(*) FROM problem_list_members WHERE problem_list_id=$1`, id).Scan(&detail.MemberCount); err != nil {
-		return domain.ProblemListDetail{}, fmt.Errorf("count problem list members: %w", err)
+	if countErr := r.query.QueryRow(ctx, `SELECT count(*) FROM problem_list_members WHERE problem_list_id=$1`, id).Scan(&detail.MemberCount); countErr != nil {
+		return domain.ProblemListDetail{}, fmt.Errorf("count problem list members: %w", countErr)
 	}
-	if err := r.query.QueryRow(ctx, `SELECT count(*) FROM task_candidates WHERE problem_list_id=$1 AND status='pending'`, id).Scan(&detail.PendingCandidates); err != nil {
-		return domain.ProblemListDetail{}, fmt.Errorf("count pending list candidates: %w", err)
+	if countErr := r.query.QueryRow(ctx, `SELECT count(*) FROM task_candidates WHERE problem_list_id=$1 AND status='pending'`, id).Scan(&detail.PendingCandidates); countErr != nil {
+		return domain.ProblemListDetail{}, fmt.Errorf("count pending list candidates: %w", countErr)
 	}
 
 	detail.Members = make([]domain.ProblemListMember, 0, detail.MemberCount)

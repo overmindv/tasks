@@ -239,8 +239,8 @@ func (r *Postgres) ListTaskDetails(ctx context.Context, filter domain.TaskFilter
 		}
 		items = append(items, domain.TaskDetail{Task: task, Version: version})
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate task list: %w", err)
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return nil, fmt.Errorf("iterate task list: %w", rowsErr)
 	}
 	versionIDs := lo.Map(items, func(item domain.TaskDetail, _ int) uuid.UUID { return item.Version.ID })
 	options, err := r.listOptions(ctx, versionIDs)

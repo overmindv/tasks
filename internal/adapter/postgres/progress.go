@@ -15,6 +15,7 @@ func (r *Postgres) GetProgressVisibility(ctx context.Context, userID uuid.UUID) 
 	if err != nil {
 		return false, fmt.Errorf("read practice progress visibility: %w", err)
 	}
+
 	return public, nil
 }
 
@@ -25,6 +26,7 @@ func (r *Postgres) SetProgressVisibility(ctx context.Context, userID uuid.UUID, 
 	if err != nil {
 		return fmt.Errorf("save practice progress visibility: %w", err)
 	}
+
 	return nil
 }
 
@@ -57,6 +59,7 @@ func (r *Postgres) VisitGradedAttempts(ctx context.Context, userID uuid.UUID, vi
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate practice attempts: %w", err)
 	}
+
 	return nil
 }
 
@@ -112,5 +115,6 @@ func (r *Postgres) ListRatedUsers(ctx context.Context, topicIDs *[]uuid.UUID, li
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate practice rating: %w", err)
 	}
+
 	return items, nil
 }

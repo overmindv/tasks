@@ -117,8 +117,8 @@ func (r *Postgres) AvailableResourceVersions(ctx context.Context, keys []domain.
 	result, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.ResourceAvailability, error) {
 		var availability domain.ResourceAvailability
 		var language, version *string
-		if err := row.Scan(&availability.Key.TaskID, &availability.Key.VersionID, &language, &version); err != nil {
-			return availability, err
+		if scanErr := row.Scan(&availability.Key.TaskID, &availability.Key.VersionID, &language, &version); scanErr != nil {
+			return availability, scanErr
 		}
 		availability.Runtime = resourceRuntime(language, version)
 

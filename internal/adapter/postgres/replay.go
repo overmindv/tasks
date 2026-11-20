@@ -24,5 +24,6 @@ func (r *Postgres) ReplayCodeSubmission(ctx context.Context, id, expected, next,
 	if err != nil {
 		return false, err
 	}
+
 	return tag.RowsAffected() == 1, nil
 }
