@@ -74,7 +74,7 @@ func (p *ProgressAccumulator) Add(attempt GradedAttempt) {
 	if withinProgressWindow(attempt.OccurredAt, p.now) {
 		p.days[day]++
 	}
-	if attempt.Verdict != "accepted" {
+	if attempt.Verdict != string(VerdictAccepted) {
 		return
 	}
 	p.summary.AcceptedAttempts++
@@ -106,6 +106,7 @@ func (p *ProgressAccumulator) Summary() ProgressSummary {
 		{Difficulty: "medium", Solved: p.difficulty["medium"]},
 		{Difficulty: "hard", Solved: p.difficulty["hard"]},
 	}
+
 	return result
 }
 
@@ -134,5 +135,6 @@ func gradedVerdict(verdict string) bool {
 func withinProgressWindow(at, now time.Time) bool {
 	date := at.UTC()
 	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -29)
+
 	return !date.Before(start) && !date.After(now)
 }

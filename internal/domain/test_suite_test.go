@@ -9,6 +9,8 @@ func validSuite() SuiteDefinition {
 	return SuiteDefinition{Language: ProgrammingLanguagePython, LanguageVersion: "3.12", Checker: "trim_newlines", Limits: SuiteLimits{CPUms: 1000, Wallms: 2000, MemoryMB: 64, PIDs: 32, StdoutBytes: 32768, StderrBytes: 32768, WorkspaceBytes: 1048576}, Cases: []SuiteCase{{ID: "sample", Input: "1", Output: "1"}, {ID: "secret", Input: "2", Output: "2", Hidden: true}}}
 }
 func TestSuiteInvariants(t *testing.T) {
+	t.Parallel()
+
 	for _, tt := range []struct {
 		name   string
 		change func(*SuiteDefinition)
@@ -21,6 +23,8 @@ func TestSuiteInvariants(t *testing.T) {
 		{"input size", func(s *SuiteDefinition) { s.Cases[0].Input = strings.Repeat("x", 65537) }},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			s := validSuite()
 			tt.change(&s)
 			if ValidateSuite(s, true) == nil {
@@ -45,6 +49,8 @@ func TestSuiteInvariants(t *testing.T) {
 }
 
 func TestSuiteWorkspaceMatchesSandbox(t *testing.T) {
+	t.Parallel()
+
 	s := validSuite()
 	s.Limits.WorkspaceBytes = 10485761
 	if ValidateSuite(s, false) == nil {
