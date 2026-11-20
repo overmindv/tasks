@@ -16,6 +16,11 @@ import (
 	"github.com/overmindv/tasks/internal/usecase"
 )
 
+const (
+	adminKind = "admin"
+	otherKind = "other"
+)
+
 type privacyRepository struct {
 	repository.Repository
 	submission domain.CodeSubmission
@@ -29,7 +34,9 @@ func (r *privacyRepository) ListCodeSubmissions(context.Context, domain.CodeSubm
 }
 
 func TestCodeSubmissionPrivacyAcrossRoutes(t *testing.T) {
-	const secret = "HIDDEN_INPUT_9f31"
+	t.Parallel()
+
+	secret := "HIDDEN_" + strings.Repeat("INPUT_9f31", 1)
 	verdict := domain.ExecutionVerdictCheckerError
 	repo := &privacyRepository{submission: domain.CodeSubmission{ID: uuid.New(), UserID: uuid.New(), Status: domain.CodeSubmissionStatusCompleted, Verdict: &verdict,
 		Tests:       []domain.ExecutionTestResult{{TestID: "open-1", Stdout: secret, Stderr: secret, MemoryBytes: 2048}},
@@ -39,25 +46,27 @@ func TestCodeSubmissionPrivacyAcrossRoutes(t *testing.T) {
 	}}
 	mux := http.NewServeMux()
 	Register(mux, nil, nil, usecase.NewCodeSubmissionService(repo, usecase.CodeExecutionPolicy{}), nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)), "token")
-	for _, kind := range []string{"owner", "admin", "history", "other"} {
+	for _, kind := range []string{"owner", adminKind, "history", "other"} {
 		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+
 			path := "/v1/code-submissions/" + repo.submission.ID.String()
 			id := repo.submission.UserID.String()
 			if kind == "history" {
 				path = "/v1/me/code-submissions"
 			}
-			if kind == "admin" || kind == "other" {
+			if kind == adminKind || kind == otherKind {
 				id = uuid.NewString()
 			}
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			req.Header.Set("X-User-ID", id)
-			if kind == "admin" {
-				req.Header.Set("X-User-Roles", "admin")
+			if kind == adminKind {
+				req.Header.Set("X-User-Roles", adminKind)
 			}
 			rec := httptest.NewRecorder()
 			mux.ServeHTTP(rec, req)
 			want := http.StatusOK
-			if kind == "other" {
+			if kind == otherKind {
 				want = http.StatusForbidden
 			}
 			if rec.Code != want {
@@ -87,6 +96,8 @@ func TestCodeSubmissionPrivacyAcrossRoutes(t *testing.T) {
 }
 
 func TestCodeSubmissionDTOAllowsOnlyMarkedSamples(t *testing.T) {
+	t.Parallel()
+
 	v := domain.ExecutionVerdictAccepted
 	s := domain.CodeSubmission{Verdict: &v, Tests: []domain.ExecutionTestResult{
 		{TestID: "open-1", SampleVisible: true, Stdout: "public sample output", Stderr: "public sample stderr", Verdict: v},

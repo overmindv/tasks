@@ -12,6 +12,8 @@ import (
 	"github.com/overmindv/tasks/internal/domain"
 )
 
+const pythonEchoSource = "print(input())"
+
 // TestParseCodeSubmission проверяет multipart contract файлового решения.
 func TestParseCodeSubmission(t *testing.T) {
 	t.Parallel()
@@ -32,11 +34,11 @@ func TestParseCodeSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateFormFile() error = %v", err)
 	}
-	if _, err := file.Write([]byte("print(input())")); err != nil {
-		t.Fatalf("file.Write() error = %v", err)
+	if _, writeErr := file.Write([]byte(pythonEchoSource)); writeErr != nil {
+		t.Fatalf("file.Write() error = %v", writeErr)
 	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("writer.Close() error = %v", err)
+	if closeErr := writer.Close(); closeErr != nil {
+		t.Fatalf("writer.Close() error = %v", closeErr)
 	}
 	request := httptest.NewRequest("POST", "/v1/tasks/unused/code-submissions", &body)
 	request.Header.Set("Content-Type", writer.FormDataContentType())
@@ -44,7 +46,7 @@ func TestParseCodeSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseCodeSubmission() error = %v", err)
 	}
-	if input.TaskVersionID != versionID || input.IdempotencyKey != key || input.Language != domain.ProgrammingLanguagePython || input.SourceCode != "print(input())" {
+	if input.TaskVersionID != versionID || input.IdempotencyKey != key || input.Language != domain.ProgrammingLanguagePython || input.SourceCode != pythonEchoSource {
 		t.Fatalf("input = %#v", input)
 	}
 }
@@ -59,7 +61,7 @@ func TestParseCodeSubmissionConsole(t *testing.T) {
 	_ = writer.WriteField("task_version_id", versionID.String())
 	_ = writer.WriteField("idempotency_key", key.String())
 	_ = writer.WriteField("language", "python")
-	_ = writer.WriteField("source_code", "print(input())")
+	_ = writer.WriteField("source_code", pythonEchoSource)
 	_ = writer.Close()
 	request := httptest.NewRequest("POST", "/v1/tasks/unused/code-submissions", &body)
 	request.Header.Set("Content-Type", writer.FormDataContentType())
@@ -70,7 +72,7 @@ func TestParseCodeSubmissionConsole(t *testing.T) {
 	if input.TaskVersionID != versionID || input.IdempotencyKey != key {
 		t.Fatalf("input = %#v", input)
 	}
-	if input.Language != domain.ProgrammingLanguagePython || input.SourceCode != "print(input())" {
+	if input.Language != domain.ProgrammingLanguagePython || input.SourceCode != pythonEchoSource {
 		t.Fatalf("input = %#v", input)
 	}
 	// Консольный вариант осознанно не задаёт имя файла: его выводит usecase из языка.
@@ -150,8 +152,12 @@ func TestParseCodeSubmissionRejectsUnknownField(t *testing.T) {
 }
 
 func TestParseRunModes(t *testing.T) {
+	t.Parallel()
+
 	for _, mode := range []string{"", "samples", "graded", "unknown"} {
 		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+
 			var body bytes.Buffer
 			writer := multipart.NewWriter(&body)
 			for k, v := range map[string]string{"task_version_id": uuid.NewString(), "idempotency_key": uuid.NewString(), "language": "python", "source_code": "print(1)"} {
@@ -168,6 +174,7 @@ func TestParseRunModes(t *testing.T) {
 				if err == nil {
 					t.Fatal("unknown mode accepted")
 				}
+
 				return
 			}
 			want := domain.RunMode(mode)

@@ -155,8 +155,8 @@ func (h *Handler) listCandidates(w http.ResponseWriter, r *http.Request) {
 		filter.Difficulty = &difficulty
 	}
 	if value := r.URL.Query().Get("problem_list_id"); value != "" {
-		listID, err := uuid.Parse(value)
-		if err != nil {
+		listID, parseErr := uuid.Parse(value)
+		if parseErr != nil {
 			writeError(w, apperror.New(apperror.ValidationError, "problem_list_id должен быть UUID", http.StatusBadRequest), h.logger)
 
 			return

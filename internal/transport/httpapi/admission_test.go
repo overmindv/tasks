@@ -12,6 +12,8 @@ import (
 )
 
 func TestAdmissionRetryAfter(t *testing.T) {
+	t.Parallel()
+
 	w := httptest.NewRecorder()
 	err := &apperror.Error{Code: apperror.RateLimited, Message: "submission capacity unavailable", Status: 429, RetryAfterSeconds: 15}
 	writeError(w, fmt.Errorf("submit: %w", err), slog.New(slog.NewTextHandler(io.Discard, nil)))

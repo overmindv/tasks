@@ -35,6 +35,7 @@ func requireUser(w http.ResponseWriter, r *http.Request) (actor, bool) {
 		role = strings.TrimSpace(role)
 		if role == "admin" || role == "superuser" {
 			admin = true
+
 			break
 		}
 	}
