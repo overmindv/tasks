@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net/http"
 	"os"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	postgresadapter "github.com/overmindv/tasks/internal/adapter/postgres"
 	"github.com/overmindv/tasks/internal/config"
 	"github.com/overmindv/tasks/internal/domain"
+	"github.com/overmindv/tasks/internal/observability"
 	"github.com/overmindv/tasks/internal/transport/httpapi"
 	kafkaadapter "github.com/overmindv/tasks/internal/transport/kafka"
 	"github.com/overmindv/tasks/internal/usecase"
@@ -27,12 +30,33 @@ func Build(app *parker.App) error {
 		return err
 	}
 
+	var executionMetrics *observability.Execution
+	if cfg.ExecutionMetricsToken != "" {
+		if cfg.ExecutionMetricsToken == cfg.TaskHunterIngestToken {
+			return errors.New("TASKS_EXECUTION_METRICS_TOKEN must differ from TASK_HUNTER_INGEST_TOKEN")
+		}
+		if cfg.ExecutionMetricsToken == cfg.ResourceToken {
+			return errors.New("TASKS_EXECUTION_METRICS_TOKEN must differ from TASKS_RESOURCE_TOKEN")
+		}
+		executionMetrics = observability.NewExecution()
+		handler, err := executionMetrics.Handler(cfg.ExecutionMetricsToken)
+		if err != nil {
+			return err
+		}
+		app.HTTP().Handle(http.MethodGet+" "+observability.ExecutionMetricsPath, handler)
+	}
+
 	pool, err := app.Postgres() // добавляет health-чек "postgres" в /ready
 	if err != nil {
 		return err
 	}
 
 	store := postgresadapter.New(pool)
+	if executionMetrics != nil {
+		app.AddRunnable("execution-queue-metrics", func(ctx context.Context) error {
+			return executionMetrics.SampleQueue(ctx, store)
+		})
+	}
 
 	producer, err := app.NewProducer()
 	if err != nil {
@@ -49,6 +73,10 @@ func Build(app *parker.App) error {
 
 	taskService := usecase.NewTaskService(store)
 	submissionService := usecase.NewSubmissionService(store)
+	languageVersions := map[domain.ProgrammingLanguage]string{
+		domain.ProgrammingLanguagePython: cfg.PythonVersion,
+		domain.ProgrammingLanguageGo:     cfg.GoVersion,
+	}
 	codeSubmissionService := usecase.NewCodeSubmissionService(store, usecase.CodeExecutionPolicy{
 		MaxPendingPerUser: cfg.AdmissionMaxPerUser, MaxPendingTotal: cfg.AdmissionMaxTotal, AdmissionRetrySeconds: cfg.AdmissionRetrySeconds,
 		RequestsTopic:    cfg.KafkaRequestsTopic,
@@ -60,11 +88,8 @@ func Build(app *parker.App) error {
 		StdoutBytes:      cfg.ExecutionStdoutBytes,
 		StderrBytes:      cfg.ExecutionStderrBytes,
 		WorkspaceBytes:   cfg.ExecutionWorkspaceBytes,
-		LanguageVersions: map[domain.ProgrammingLanguage]string{
-			domain.ProgrammingLanguagePython: cfg.PythonVersion,
-			domain.ProgrammingLanguageGo:     cfg.GoVersion,
-		},
-	})
+		LanguageVersions: languageVersions,
+	}).WithExecutionMetrics(executionMetrics)
 	candidateService := usecase.NewCandidateService(store)
 	progressService := usecase.NewProgressService(store)
 	problemListService := usecase.NewProblemListService(store)
@@ -80,6 +105,9 @@ func Build(app *parker.App) error {
 		cfg.TaskHunterIngestToken,
 	)
 	httpapi.RegisterProgress(app.HTTP(), progressService, app.Logger())
+	if err := httpapi.RegisterResources(app.HTTP(), usecase.NewResourceService(store, languageVersions), cfg.ResourceToken, app.Logger()); err != nil {
+		return err
+	}
 	var suiteObjects usecase.SuiteObjectStore
 	if os.Getenv("TASKS_SUITE_S3_ENDPOINT") != "" || os.Getenv("TASKS_SUITE_S3_BUCKET") != "" || os.Getenv("TASKS_SUITE_S3_ACCESS_KEY_ID") != "" || os.Getenv("TASKS_SUITE_S3_SECRET_ACCESS_KEY") != "" {
 		suiteObjects, err = suitestore.New(suitestore.Config{Endpoint: os.Getenv("TASKS_SUITE_S3_ENDPOINT"), Region: os.Getenv("TASKS_SUITE_S3_REGION"), Bucket: os.Getenv("TASKS_SUITE_S3_BUCKET"), AccessKey: os.Getenv("TASKS_SUITE_S3_ACCESS_KEY_ID"), SecretKey: os.Getenv("TASKS_SUITE_S3_SECRET_ACCESS_KEY"), Prefix: os.Getenv("TASKS_SUITE_S3_PREFIX")})
@@ -87,9 +115,9 @@ func Build(app *parker.App) error {
 			return err
 		}
 	}
-	httpapi.RegisterSuites(app.HTTP(), usecase.NewSuiteService(store, suiteObjects, map[domain.ProgrammingLanguage]string{domain.ProgrammingLanguagePython: cfg.PythonVersion, domain.ProgrammingLanguageGo: cfg.GoVersion}), app.Logger())
+	httpapi.RegisterSuites(app.HTTP(), usecase.NewSuiteService(store, suiteObjects, languageVersions), app.Logger())
 
-	dispatcher := kafkaadapter.NewOutboxDispatcher(store, producer, cfg.OutboxPollInterval, app.Logger())
+	dispatcher := kafkaadapter.NewOutboxDispatcher(store, producer, cfg.OutboxPollInterval, app.Logger()).WithExecutionMetrics(executionMetrics)
 	consumer := kafkaadapter.NewResultConsumer(consumerClient, codeSubmissionService, app.Logger())
 
 	// Второй диспетчер — business-события задач (task.published) через стандартную
@@ -121,7 +149,7 @@ func runReaper(ctx context.Context, service *usecase.CodeSubmissionService, inte
 			if ctx.Err() != nil {
 				return nil
 			}
-			logger.ErrorContext(ctx, "reaper: временная ошибка, повтор", "error", err, "retry_after", interval)
+			logger.ErrorContext(ctx, "execution reaper failed", "retry_after", interval)
 			select {
 			case <-ctx.Done():
 				return nil

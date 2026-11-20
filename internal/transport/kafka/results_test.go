@@ -245,6 +245,8 @@ func TestResultLogsNeverContainExecutionOutput(t *testing.T) {
 			}
 			result["logs"] = map[string]any{"stdout": "HIDDEN_INPUT", "stderr": "HIDDEN_INPUT", "stdout_artifact": map[string]any{"url": "https://artifact.invalid/HIDDEN_INPUT"}}
 			result["error"] = map[string]any{"code": "HIDDEN_INPUT", "message": "HIDDEN_INPUT", "retryable": false}
+			correlation := uuid.NewString()
+			result["trace_id"] = correlation
 			if mode == "mismatch" {
 				result["submission_id"] = "HIDDEN_INPUT"
 				result["attempt_id"] = "HIDDEN_INPUT"
@@ -267,6 +269,9 @@ func TestResultLogsNeverContainExecutionOutput(t *testing.T) {
 			}
 			if strings.Contains(logs.String(), "HIDDEN_INPUT") || strings.Contains(logs.String(), "artifact.invalid") {
 				t.Fatalf("raw result logged: %s", logs.String())
+			}
+			if logged := strings.Contains(logs.String(), correlation); logged != (mode == "processed") {
+				t.Error("only a matched result may log its correlation")
 			}
 		})
 	}

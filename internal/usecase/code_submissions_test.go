@@ -178,6 +178,7 @@ func TestCodeSubmissionServiceUsesTransactionalOutboxAndIdempotency(t *testing.T
 		t.Fatalf("decode outbox request: %v", err)
 	}
 	if request.SubmissionID != created.ID.String() || request.AttemptID != created.ExecutionID.String() ||
+		request.TraceID != created.CorrelationID.String() ||
 		request.Execution == nil || len(request.Execution.Inputs) != 1 ||
 		request.Execution.Inputs[0] != "hello" ||
 		request.Code.Files == nil || len(request.Code.Files) != 1 || request.Code.Files[0].ContentB64 == "" ||
@@ -402,7 +403,8 @@ func TestCodeSubmissionServiceRetriesInfraErrorThenExhausts(t *testing.T) {
 		if err := json.Unmarshal(message.Payload, &retried); err != nil {
 			t.Fatal(err)
 		}
-		if message.MessageKey != created.ID.String() || retried.Metadata["task_version_id"] != versionID.String() {
+		if message.MessageKey != created.ID.String() || retried.Metadata["task_version_id"] != versionID.String() ||
+			retried.TraceID != created.CorrelationID.String() {
 			t.Errorf("retry identity: key=%s metadata=%v", message.MessageKey, retried.Metadata)
 		}
 		state := repo.submissions[created.ID]

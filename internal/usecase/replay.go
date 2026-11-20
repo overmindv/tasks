@@ -9,6 +9,7 @@ import (
 	"github.com/overmindv/tasks/internal/apperror"
 	"github.com/overmindv/tasks/internal/domain"
 	"github.com/overmindv/tasks/internal/execution"
+	"github.com/overmindv/tasks/internal/observability"
 	"github.com/overmindv/tasks/internal/repository"
 )
 
@@ -87,5 +88,8 @@ func (s *CodeSubmissionService) Replay(ctx context.Context, id, expected, actor 
 		}
 		return tx.InsertOutboxMessage(ctx, domain.OutboxMessage{ID: uuid.New(), AggregateID: id, Topic: s.policy.RequestsTopic, MessageKey: id.String(), Payload: payload, AvailableAt: now, CreatedAt: now})
 	})
+	if err == nil {
+		s.metrics.Attempt(observability.ReplayAttempt)
+	}
 	return next, err
 }

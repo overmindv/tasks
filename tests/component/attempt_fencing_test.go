@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	postgresadapter "github.com/overmindv/tasks/internal/adapter/postgres"
 	"github.com/overmindv/tasks/internal/domain"
 	"github.com/overmindv/tasks/internal/execution"
+	"github.com/overmindv/tasks/internal/observability"
 	"github.com/overmindv/tasks/internal/repository"
 	"github.com/overmindv/tasks/internal/transport/httpapi"
 	"github.com/overmindv/tasks/internal/usecase"
@@ -262,6 +264,86 @@ func TestAttemptFencingPostgres(t *testing.T) {
 			t.Fatal("retry after rollback did not recover")
 		}
 	})
+	t.Run("metrics count committed transitions", func(t *testing.T) {
+		metrics := observability.NewExecution()
+		token := strings.Repeat("x", 32)
+		handler, err := metrics.Handler(token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scrape := func() string {
+			req := httptest.NewRequest(http.MethodGet, observability.ExecutionMetricsPath, nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			res := httptest.NewRecorder()
+			handler.ServeHTTP(res, req)
+			return res.Body.String()
+		}
+		observed := usecase.NewCodeSubmissionService(store, policy).WithExecutionMetrics(metrics)
+		broken := usecase.NewCodeSubmissionService(rollbackAfterWrite{store}, policy).WithExecutionMetrics(metrics)
+		input := usecase.CodeSubmissionInput{
+			TaskVersionID: uuid.MustParse(task.TaskVersionID), IdempotencyKey: uuid.New(),
+			Language: domain.ProgrammingLanguagePython, SourceCode: "print(input())",
+		}
+		actor, taskID := uuid.New(), uuid.MustParse(task.ID)
+		if _, err := broken.Submit(ctx, taskID, actor, input); err == nil {
+			t.Fatal("expected submission rollback")
+		}
+		first, err := observed.Submit(ctx, taskID, actor, input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = observed.Submit(ctx, taskID, actor, input); err != nil {
+			t.Fatal(err)
+		}
+		if err := broken.HandleRunResult(ctx, meta(first, 1), result(first, "ok")); err == nil {
+			t.Fatal("expected result rollback")
+		}
+		if strings.Contains(scrape(), "tasks_execution_verdicts_total{") {
+			t.Error("rolled back verdict counted")
+		}
+		handle := func() error { return observed.HandleRunResult(ctx, meta(first, 1), result(first, "ok")) }
+		together(handle, handle)
+		for range 2 {
+			if err := observed.RejectResult(ctx, meta(first, 2), nil, execution.InboxErrorInvalidEvent); err != nil {
+				t.Fatal(err)
+			}
+		}
+		body := scrape()
+		for _, want := range []string{
+			`tasks_execution_attempts_total{kind="initial"} 1`,
+			`tasks_execution_verdicts_total{run_mode="samples",verdict="accepted"} 1`,
+			`tasks_execution_final_latency_seconds_count{run_mode="samples"} 1`,
+			`tasks_execution_rejected_results_total{reason="invalid_event"} 1`,
+		} {
+			if !strings.Contains(body, want+"\n") {
+				t.Errorf("missing sample: %s", want)
+			}
+		}
+	})
+	t.Run("queue ages and outbox correlation", func(t *testing.T) {
+		first := create()
+		if _, err := pool.Exec(ctx, "UPDATE code_submissions SET created_at=now()-interval '2 hours' WHERE id=$1", first.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, "UPDATE code_submission_outbox SET created_at=now()-interval '1 hour', available_at=now()-interval '1 day' WHERE aggregate_id=$1", first.ID); err != nil {
+			t.Fatal(err)
+		}
+		outboxAge, resultAge, err := store.ExecutionQueueAges(ctx)
+		if err != nil || outboxAge < 3600 || resultAge < 7200 {
+			t.Errorf("outbox=%f result=%f err=%v", outboxAge, resultAge, err)
+		}
+		token := uuid.New()
+		claimed, err := store.ClaimOutboxMessages(ctx, 1, token, time.Now().Add(time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(claimed) != 1 || claimed[0].CorrelationID != first.CorrelationID {
+			t.Fatal("outbox claim missing submission correlation")
+		}
+		if err := store.MarkOutboxPublished(ctx, claimed[0].ID, token); err != nil {
+			t.Fatal(err)
+		}
+	})
 	t.Run("adapter CAS rejects stale attempt", func(t *testing.T) {
 		first := create()
 		next := uuid.New()
@@ -285,6 +367,17 @@ func TestAttemptFencingPostgres(t *testing.T) {
 }
 
 type failingAttemptOutbox struct{ repository.Repository }
+
+type rollbackAfterWrite struct{ repository.Repository }
+
+func (r rollbackAfterWrite) WithinTransaction(ctx context.Context, fn func(repository.Repository) error) error {
+	return r.Repository.WithinTransaction(ctx, func(tx repository.Repository) error {
+		if err := fn(tx); err != nil {
+			return err
+		}
+		return errors.New("injected rollback after successful write")
+	})
+}
 
 func (f failingAttemptOutbox) WithinTransaction(ctx context.Context, fn func(repository.Repository) error) error {
 	return f.Repository.WithinTransaction(ctx, func(tx repository.Repository) error { return fn(failingAttemptOutbox{tx}) })

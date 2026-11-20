@@ -156,7 +156,7 @@ func (s *SuiteService) Publish(ctx context.Context, id uuid.UUID, revision int, 
 		if err != nil {
 			return err
 		}
-		input := domain.TaskInput{TopicID: old.TopicID, Title: old.Title, Statement: old.Statement, TaskType: old.TaskType, Difficulty: old.Difficulty, Tags: old.Tags, Examples: old.Examples, Constraints: old.Constraints, Source: old.Source}
+		input := domain.TaskInput{TopicID: old.TopicID, Title: old.Title, Statement: old.Statement, TaskType: old.TaskType, Difficulty: old.Difficulty, EstimatedMinutes: old.EstimatedMinutes, Tags: old.Tags, Examples: old.Examples, Constraints: old.Constraints, Source: old.Source}
 		next := buildVersion(d.TaskID, uuid.New(), old.VersionNumber+1, input, actor)
 		if err := tx.InsertTaskVersion(ctx, next); err != nil {
 			return err

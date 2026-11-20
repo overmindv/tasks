@@ -1,10 +1,12 @@
 package kafka
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,9 +17,10 @@ import (
 
 type outboxRepository struct {
 	repository.Repository
-	message  domain.OutboxMessage
-	marked   bool
-	released bool
+	message     domain.OutboxMessage
+	marked      bool
+	released    bool
+	releaseCode string
 }
 
 // ClaimOutboxMessages возвращает одну подготовленную запись.
@@ -35,8 +38,9 @@ func (r *outboxRepository) MarkOutboxPublished(_ context.Context, _, _ uuid.UUID
 }
 
 // ReleaseOutboxMessage отмечает отложенную повторную публикацию.
-func (r *outboxRepository) ReleaseOutboxMessage(_ context.Context, _, _ uuid.UUID, _ time.Time, _ string) error {
+func (r *outboxRepository) ReleaseOutboxMessage(_ context.Context, _, _ uuid.UUID, _ time.Time, code string) error {
 	r.released = true
+	r.releaseCode = code
 
 	return nil
 }
@@ -81,18 +85,24 @@ func TestOutboxDispatcherConfirmsBrokerAck(t *testing.T) {
 func TestOutboxDispatcherReleasesFailedPublish(t *testing.T) {
 	t.Parallel()
 	repo := &outboxRepository{message: domain.OutboxMessage{
-		ID:          uuid.New(),
-		AggregateID: uuid.New(),
-		Topic:       "requests",
-		MessageKey:  uuid.NewString(),
-		Payload:     []byte(`{}`),
+		ID:            uuid.New(),
+		AggregateID:   uuid.New(),
+		Topic:         "requests",
+		MessageKey:    uuid.NewString(),
+		Payload:       []byte(`{}`),
+		CorrelationID: uuid.New(),
 	}}
-	publisher := &publisherStub{err: errors.New("broker unavailable")}
-	dispatcher := NewOutboxDispatcher(repo, publisher, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	publisher := &publisherStub{err: errors.New("broker unavailable: PRIVATE_PAYLOAD")}
+	var logs bytes.Buffer
+	dispatcher := NewOutboxDispatcher(repo, publisher, time.Second, slog.New(slog.NewJSONHandler(&logs, nil)))
 	if err := dispatcher.dispatch(context.Background()); err != nil {
 		t.Fatalf("dispatch() error = %v", err)
 	}
 	if repo.marked || !repo.released {
 		t.Fatalf("marked=%v released=%v", repo.marked, repo.released)
+	}
+	if repo.releaseCode != "kafka_publish_failed" || strings.Contains(logs.String(), "PRIVATE_PAYLOAD") ||
+		!strings.Contains(logs.String(), repo.message.CorrelationID.String()) {
+		t.Error("incorrect redaction or missing correlation in outbox failure")
 	}
 }

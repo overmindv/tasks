@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,16 +12,17 @@ import (
 )
 
 type taskInput struct {
-	TopicID     *string        `json:"topic_id"`
-	Title       string         `json:"title"`
-	Statement   string         `json:"statement"`
-	TaskType    string         `json:"task_type"`
-	Difficulty  string         `json:"difficulty"`
-	Options     []optionInput  `json:"options"`
-	Tags        []string       `json:"tags"`
-	Examples    []exampleInput `json:"examples"`
-	Constraints []string       `json:"constraints"`
-	Source      *sourceInput   `json:"source"`
+	EstimatedMinutes json.RawMessage `json:"estimated_minutes"`
+	TopicID          *string         `json:"topic_id"`
+	Title            string          `json:"title"`
+	Statement        string          `json:"statement"`
+	TaskType         string          `json:"task_type"`
+	Difficulty       string          `json:"difficulty"`
+	Options          []optionInput   `json:"options"`
+	Tags             []string        `json:"tags"`
+	Examples         []exampleInput  `json:"examples"`
+	Constraints      []string        `json:"constraints"`
+	Source           *sourceInput    `json:"source"`
 }
 
 type exampleInput struct {
@@ -58,35 +61,37 @@ type optionResponse struct {
 }
 
 type taskResponse struct {
-	ID            string           `json:"id"`
-	Status        string           `json:"status"`
-	TaskVersionID string           `json:"task_version_id"`
-	VersionNumber int              `json:"version_number"`
-	TopicID       *string          `json:"topic_id"`
-	Title         string           `json:"title"`
-	Statement     string           `json:"statement"`
-	TaskType      string           `json:"task_type"`
-	Difficulty    string           `json:"difficulty"`
-	Options       []optionResponse `json:"options"`
-	Tags          []string         `json:"tags"`
-	Examples      []exampleInput   `json:"examples"`
-	Constraints   []string         `json:"constraints"`
-	Source        *sourceInput     `json:"source,omitempty"`
-	CreatedAt     time.Time        `json:"created_at"`
-	UpdatedAt     time.Time        `json:"updated_at"`
+	EstimatedMinutes *int             `json:"estimated_minutes,omitempty"`
+	ID               string           `json:"id"`
+	Status           string           `json:"status"`
+	TaskVersionID    string           `json:"task_version_id"`
+	VersionNumber    int              `json:"version_number"`
+	TopicID          *string          `json:"topic_id"`
+	Title            string           `json:"title"`
+	Statement        string           `json:"statement"`
+	TaskType         string           `json:"task_type"`
+	Difficulty       string           `json:"difficulty"`
+	Options          []optionResponse `json:"options"`
+	Tags             []string         `json:"tags"`
+	Examples         []exampleInput   `json:"examples"`
+	Constraints      []string         `json:"constraints"`
+	Source           *sourceInput     `json:"source,omitempty"`
+	CreatedAt        time.Time        `json:"created_at"`
+	UpdatedAt        time.Time        `json:"updated_at"`
 }
 
 type taskSummaryResponse struct {
-	ID            string    `json:"id"`
-	Status        string    `json:"status"`
-	TaskVersionID string    `json:"task_version_id"`
-	VersionNumber int       `json:"version_number"`
-	TopicID       *string   `json:"topic_id"`
-	Title         string    `json:"title"`
-	TaskType      string    `json:"task_type"`
-	Difficulty    string    `json:"difficulty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	EstimatedMinutes *int      `json:"estimated_minutes,omitempty"`
+	ID               string    `json:"id"`
+	Status           string    `json:"status"`
+	TaskVersionID    string    `json:"task_version_id"`
+	VersionNumber    int       `json:"version_number"`
+	TopicID          *string   `json:"topic_id"`
+	Title            string    `json:"title"`
+	TaskType         string    `json:"task_type"`
+	Difficulty       string    `json:"difficulty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type submissionResponse struct {
@@ -150,6 +155,12 @@ func (input taskInput) domainInput() (domain.TaskInput, error) {
 	if err != nil {
 		return domain.TaskInput{}, err
 	}
+	var estimatedMinutes *int
+	if len(input.EstimatedMinutes) != 0 {
+		if err := json.Unmarshal(input.EstimatedMinutes, &estimatedMinutes); err != nil {
+			return domain.TaskInput{}, errors.New("estimated_minutes должен быть целым числом или null")
+		}
+	}
 	options := lo.Map(input.Options, func(option optionInput, _ int) domain.OptionInput {
 		return domain.OptionInput{
 			Text:      option.Text,
@@ -158,13 +169,15 @@ func (input taskInput) domainInput() (domain.TaskInput, error) {
 	})
 
 	return domain.TaskInput{
-		TopicID:    topicID,
-		Title:      input.Title,
-		Statement:  input.Statement,
-		TaskType:   domain.TaskType(input.TaskType),
-		Difficulty: domain.Difficulty(input.Difficulty),
-		Options:    options,
-		Tags:       input.Tags,
+		TopicID:             topicID,
+		Title:               input.Title,
+		Statement:           input.Statement,
+		TaskType:            domain.TaskType(input.TaskType),
+		Difficulty:          domain.Difficulty(input.Difficulty),
+		EstimatedMinutes:    estimatedMinutes,
+		SetEstimatedMinutes: len(input.EstimatedMinutes) != 0,
+		Options:             options,
+		Tags:                input.Tags,
 		Examples: lo.Map(input.Examples, func(example exampleInput, _ int) domain.TaskExample {
 			return domain.TaskExample{Input: example.Input, Output: example.Output, Explanation: example.Explanation}
 		}),
@@ -190,17 +203,18 @@ func responseTask(detail domain.TaskDetail, admin bool) taskResponse {
 	})
 
 	return taskResponse{
-		ID:            detail.Task.ID.String(),
-		Status:        string(detail.Task.Status),
-		TaskVersionID: detail.Version.ID.String(),
-		VersionNumber: detail.Version.VersionNumber,
-		TopicID:       optionalUUIDString(detail.Version.TopicID),
-		Title:         detail.Version.Title,
-		Statement:     detail.Version.Statement,
-		TaskType:      string(detail.Version.TaskType),
-		Difficulty:    string(detail.Version.Difficulty),
-		Options:       options,
-		Tags:          detail.Version.Tags,
+		ID:               detail.Task.ID.String(),
+		Status:           string(detail.Task.Status),
+		TaskVersionID:    detail.Version.ID.String(),
+		VersionNumber:    detail.Version.VersionNumber,
+		TopicID:          optionalUUIDString(detail.Version.TopicID),
+		Title:            detail.Version.Title,
+		Statement:        detail.Version.Statement,
+		TaskType:         string(detail.Version.TaskType),
+		Difficulty:       string(detail.Version.Difficulty),
+		EstimatedMinutes: detail.Version.EstimatedMinutes,
+		Options:          options,
+		Tags:             detail.Version.Tags,
 		Examples: lo.Map(detail.Version.Examples, func(example domain.TaskExample, _ int) exampleInput {
 			return exampleInput{Input: example.Input, Output: example.Output, Explanation: example.Explanation}
 		}),
@@ -232,16 +246,17 @@ func sourceResponse(source *domain.TaskSource) *sourceInput {
 // responseTaskSummary преобразует доменную задачу в элемент списка.
 func responseTaskSummary(detail domain.TaskDetail) taskSummaryResponse {
 	return taskSummaryResponse{
-		ID:            detail.Task.ID.String(),
-		Status:        string(detail.Task.Status),
-		TaskVersionID: detail.Version.ID.String(),
-		VersionNumber: detail.Version.VersionNumber,
-		TopicID:       optionalUUIDString(detail.Version.TopicID),
-		Title:         detail.Version.Title,
-		TaskType:      string(detail.Version.TaskType),
-		Difficulty:    string(detail.Version.Difficulty),
-		CreatedAt:     detail.Task.CreatedAt,
-		UpdatedAt:     detail.Task.UpdatedAt,
+		ID:               detail.Task.ID.String(),
+		Status:           string(detail.Task.Status),
+		TaskVersionID:    detail.Version.ID.String(),
+		VersionNumber:    detail.Version.VersionNumber,
+		TopicID:          optionalUUIDString(detail.Version.TopicID),
+		Title:            detail.Version.Title,
+		TaskType:         string(detail.Version.TaskType),
+		Difficulty:       string(detail.Version.Difficulty),
+		EstimatedMinutes: detail.Version.EstimatedMinutes,
+		CreatedAt:        detail.Task.CreatedAt,
+		UpdatedAt:        detail.Task.UpdatedAt,
 	}
 }
 

@@ -39,6 +39,7 @@ func (r *Postgres) InsertTaskVersion(ctx context.Context, version domain.TaskVer
 		taskVersions.Statement,
 		taskVersions.TaskType,
 		taskVersions.Difficulty,
+		taskVersions.EstimatedMinutes,
 		taskVersions.CreatedBy,
 	).VALUES(
 		version.ID.String(),
@@ -49,6 +50,7 @@ func (r *Postgres) InsertTaskVersion(ctx context.Context, version domain.TaskVer
 		version.Statement,
 		string(version.TaskType),
 		string(version.Difficulty),
+		version.EstimatedMinutes,
 		version.CreatedBy.String(),
 	)
 	query, args := statementSQL(statement)
@@ -133,6 +135,7 @@ func (r *Postgres) GetTaskVersion(ctx context.Context, taskID, versionID uuid.UU
 		taskVersions.Statement,
 		taskVersions.TaskType,
 		taskVersions.Difficulty,
+		taskVersions.EstimatedMinutes,
 		taskVersions.CreatedBy,
 		taskVersions.CreatedAt,
 		taskVersions.UpdatedAt,
@@ -215,6 +218,7 @@ func (r *Postgres) ListTaskDetails(ctx context.Context, filter domain.TaskFilter
 		taskVersions.Statement,
 		taskVersions.TaskType,
 		taskVersions.Difficulty,
+		taskVersions.EstimatedMinutes,
 		taskVersions.CreatedBy,
 		taskVersions.CreatedAt,
 		taskVersions.UpdatedAt,
@@ -372,7 +376,7 @@ func scanTaskVersion(row pgx.Row) (domain.TaskVersion, error) {
 	var version domain.TaskVersion
 	var taskType string
 	var difficulty string
-	err := row.Scan(&version.ID, &version.TaskID, &version.VersionNumber, &version.TopicID, &version.Title, &version.Statement, &taskType, &difficulty, &version.CreatedBy, &version.CreatedAt, &version.UpdatedAt)
+	err := row.Scan(&version.ID, &version.TaskID, &version.VersionNumber, &version.TopicID, &version.Title, &version.Statement, &taskType, &difficulty, &version.EstimatedMinutes, &version.CreatedBy, &version.CreatedAt, &version.UpdatedAt)
 	version.TaskType = domain.TaskType(taskType)
 	version.Difficulty = domain.Difficulty(difficulty)
 
@@ -403,6 +407,7 @@ func scanTaskDetail(row pgx.Row) (domain.Task, domain.TaskVersion, error) {
 		&version.Statement,
 		&taskType,
 		&difficulty,
+		&version.EstimatedMinutes,
 		&version.CreatedBy,
 		&version.CreatedAt,
 		&version.UpdatedAt,

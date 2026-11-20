@@ -60,6 +60,7 @@ docker build -t tasks:local .
 - HTTP API: [`api/openapi.yaml`](api/openapi.yaml);
 - Kafka request/result JSON Schema: каталог [`api/events`](api/events);
 - архитектура: [`docs/architecture.md`](docs/architecture.md);
+- диагностика запусков: [`docs/execution-operations.md`](docs/execution-operations.md);
 - будущие изменения связанных сервисов: каталог [`docs/integrations`](docs/integrations).
 
 Административные и пользовательские методы доверяют заголовкам `X-User-ID` и `X-User-Roles`, которые может выставлять только `api-gateway` во внутренней сети.

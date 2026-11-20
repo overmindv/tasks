@@ -48,17 +48,18 @@ func newTasksTable(alias string) tasksTable {
 
 type taskVersionsTable struct {
 	postgres.Table
-	ID            postgres.ColumnString
-	TaskID        postgres.ColumnString
-	VersionNumber postgres.ColumnInteger
-	TopicID       postgres.ColumnString
-	Title         postgres.ColumnString
-	Statement     postgres.ColumnString
-	TaskType      postgres.ColumnString
-	Difficulty    postgres.ColumnString
-	CreatedBy     postgres.ColumnString
-	CreatedAt     postgres.ColumnTimestampz
-	UpdatedAt     postgres.ColumnTimestampz
+	ID               postgres.ColumnString
+	TaskID           postgres.ColumnString
+	VersionNumber    postgres.ColumnInteger
+	TopicID          postgres.ColumnString
+	Title            postgres.ColumnString
+	Statement        postgres.ColumnString
+	TaskType         postgres.ColumnString
+	Difficulty       postgres.ColumnString
+	EstimatedMinutes postgres.ColumnInteger
+	CreatedBy        postgres.ColumnString
+	CreatedAt        postgres.ColumnTimestampz
+	UpdatedAt        postgres.ColumnTimestampz
 }
 
 // newTaskVersionsTable создаёт типизированное описание таблицы task_versions.
@@ -71,23 +72,25 @@ func newTaskVersionsTable(alias string) taskVersionsTable {
 	statement := postgres.StringColumn("statement")
 	taskType := postgres.StringColumn("task_type")
 	difficulty := postgres.StringColumn("difficulty")
+	estimatedMinutes := postgres.IntegerColumn("estimated_minutes")
 	createdBy := postgres.StringColumn("created_by")
 	createdAt := postgres.TimestampzColumn("created_at")
 	updatedAt := postgres.TimestampzColumn("updated_at")
 
 	return taskVersionsTable{
-		Table:         postgres.NewTable("public", "task_versions", alias, id, taskID, versionNumber, topicID, title, statement, taskType, difficulty, createdBy, createdAt, updatedAt),
-		ID:            id,
-		TaskID:        taskID,
-		VersionNumber: versionNumber,
-		TopicID:       topicID,
-		Title:         title,
-		Statement:     statement,
-		TaskType:      taskType,
-		Difficulty:    difficulty,
-		CreatedBy:     createdBy,
-		CreatedAt:     createdAt,
-		UpdatedAt:     updatedAt,
+		Table:            postgres.NewTable("public", "task_versions", alias, id, taskID, versionNumber, topicID, title, statement, taskType, difficulty, estimatedMinutes, createdBy, createdAt, updatedAt),
+		ID:               id,
+		TaskID:           taskID,
+		VersionNumber:    versionNumber,
+		TopicID:          topicID,
+		Title:            title,
+		Statement:        statement,
+		TaskType:         taskType,
+		Difficulty:       difficulty,
+		EstimatedMinutes: estimatedMinutes,
+		CreatedBy:        createdBy,
+		CreatedAt:        createdAt,
+		UpdatedAt:        updatedAt,
 	}
 }
 

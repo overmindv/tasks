@@ -43,6 +43,9 @@ func TestReplayRequiresAdminAndRotatesAttempt(t *testing.T) {
 	if err = json.Unmarshal(repo.outbox[len(repo.outbox)-1].Payload, &request); err != nil {
 		t.Fatal(err)
 	}
+	if request.TraceID != first.CorrelationID.String() {
+		t.Error("replay must keep the original correlation")
+	}
 	deadline, err := time.Parse(time.RFC3339Nano, request.Metadata["attempt_deadline"].(string))
 	if err != nil || deadline.Sub(request.CreatedAt) != svc.policy.RetryGrace {
 		t.Fatalf("deadline: %v", err)
