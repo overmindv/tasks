@@ -16,13 +16,14 @@ const TaskActivityTopic = "task.activity.v1"
 type TaskActivityOutboxMessage struct {
 	ID    uuid.UUID // PK outbox-таблицы
 	Topic string    // task.activity.v1
-	Key   string    // taskID (идемпотентный ключ для feed consumer-а)
+	Key   string    // taskID для порядка событий в партиции
 	Value []byte    // taskEnvelope JSON
 	// CreatedAt и метки диспетчеризации заполняются БД/диспетчером.
 }
 
 // TaskPublishedEvent формирует payload события публикации задачи.
 type TaskPublishedEvent struct {
+	EventID    uuid.UUID  `json:"event_id"`
 	EventType  string     `json:"event_type"`
 	OccurredAt time.Time  `json:"occurred_at"`
 	TaskID     string     `json:"task_id"`

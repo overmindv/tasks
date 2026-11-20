@@ -271,7 +271,9 @@ func emitTaskActivity(ctx context.Context, tx repository.Repository, taskID uuid
 // emitTaskActivityVersion сохраняет событие публикации задачи по уже готовой
 // версии (используется и при смене статуса, и при одобрении собранного кандидата).
 func emitTaskActivityVersion(ctx context.Context, tx repository.Repository, taskID uuid.UUID, version domain.TaskVersion) error {
+	eventID := uuid.New()
 	value, err := json.Marshal(domain.TaskPublishedEvent{
+		EventID:    eventID,
 		EventType:  "task.published",
 		OccurredAt: time.Now().UTC(),
 		TaskID:     taskID.String(),
@@ -285,7 +287,7 @@ func emitTaskActivityVersion(ctx context.Context, tx repository.Repository, task
 	}
 
 	return tx.InsertTaskActivityOutbox(ctx, domain.TaskActivityOutboxMessage{
-		ID:    uuid.New(),
+		ID:    eventID,
 		Topic: domain.TaskActivityTopic,
 		Key:   taskID.String(),
 		Value: value,
