@@ -50,16 +50,17 @@ func (r *Postgres) hydrateTaskContent(ctx context.Context, versions map[uuid.UUI
 	for rows.Next() {
 		var id uuid.UUID
 		var value string
-		if err := rows.Scan(&id, &value); err != nil {
+		if scanErr := rows.Scan(&id, &value); scanErr != nil {
 			rows.Close()
-			return fmt.Errorf("scan task version tag: %w", err)
+
+			return fmt.Errorf("scan task version tag: %w", scanErr)
 		}
 		versions[id].Tags = append(versions[id].Tags, value)
 	}
-	if err := rows.Err(); err != nil {
+	if rowsErr := rows.Err(); rowsErr != nil {
 		rows.Close()
 
-		return fmt.Errorf("iterate task version tags: %w", err)
+		return fmt.Errorf("iterate task version tags: %w", rowsErr)
 	}
 	rows.Close()
 
@@ -70,16 +71,17 @@ func (r *Postgres) hydrateTaskContent(ctx context.Context, versions map[uuid.UUI
 	for rows.Next() {
 		var id uuid.UUID
 		var example domain.TaskExample
-		if err := rows.Scan(&id, &example.Input, &example.Output, &example.Explanation); err != nil {
+		if scanErr := rows.Scan(&id, &example.Input, &example.Output, &example.Explanation); scanErr != nil {
 			rows.Close()
-			return fmt.Errorf("scan task version example: %w", err)
+
+			return fmt.Errorf("scan task version example: %w", scanErr)
 		}
 		versions[id].Examples = append(versions[id].Examples, example)
 	}
-	if err := rows.Err(); err != nil {
+	if rowsErr := rows.Err(); rowsErr != nil {
 		rows.Close()
 
-		return fmt.Errorf("iterate task version examples: %w", err)
+		return fmt.Errorf("iterate task version examples: %w", rowsErr)
 	}
 	rows.Close()
 
@@ -90,16 +92,17 @@ func (r *Postgres) hydrateTaskContent(ctx context.Context, versions map[uuid.UUI
 	for rows.Next() {
 		var id uuid.UUID
 		var value string
-		if err := rows.Scan(&id, &value); err != nil {
+		if scanErr := rows.Scan(&id, &value); scanErr != nil {
 			rows.Close()
-			return fmt.Errorf("scan task version constraint: %w", err)
+
+			return fmt.Errorf("scan task version constraint: %w", scanErr)
 		}
 		versions[id].Constraints = append(versions[id].Constraints, value)
 	}
-	if err := rows.Err(); err != nil {
+	if rowsErr := rows.Err(); rowsErr != nil {
 		rows.Close()
 
-		return fmt.Errorf("iterate task version constraints: %w", err)
+		return fmt.Errorf("iterate task version constraints: %w", rowsErr)
 	}
 	rows.Close()
 

@@ -112,6 +112,7 @@ func (r *Postgres) GetCodeSubmissionForUpdate(ctx context.Context, id uuid.UUID)
 	if err != nil {
 		return domain.CodeSubmission{}, notFound(err, apperror.CodeSubmissionNotFound, "code submission not found")
 	}
+
 	return submission, nil
 }
 

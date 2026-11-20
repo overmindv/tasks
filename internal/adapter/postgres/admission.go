@@ -18,5 +18,6 @@ func (r *Postgres) CodeAdmissionUsage(ctx context.Context, userID uuid.UUID) (ow
 		return 0, 0, err
 	}
 	err = r.query.QueryRow(ctx, `SELECT count(*) FILTER (WHERE user_id=$1),count(*) FROM code_submissions WHERE status='queued'`, userID).Scan(&own, &total)
+
 	return
 }
