@@ -19,6 +19,7 @@ type ResourceStore interface {
 	ResourceSnapshot(ctx context.Context, watermark int64, after uuid.UUID, limit int) ([]domain.ResourceChange, error)
 	ResourceChanges(ctx context.Context, watermark, after int64, limit int) ([]domain.ResourceChange, error)
 	AvailableResourceVersions(context.Context, []domain.ResourceKey) ([]domain.ResourceAvailability, error)
+	DiagnosticResourceVersions(context.Context, uuid.UUID, []domain.ResourceKey) ([]domain.ResourceAvailability, error)
 }
 
 type ResourceService struct {
@@ -85,6 +86,18 @@ func (s *ResourceService) Changes(ctx context.Context, requested *int64, after i
 }
 
 func (s *ResourceService) Available(ctx context.Context, keys []domain.ResourceKey) ([]domain.ResourceKey, error) {
+	return s.available(ctx, uuid.Nil, keys)
+}
+
+func (s *ResourceService) DiagnosticEligible(ctx context.Context, learner uuid.UUID, keys []domain.ResourceKey) ([]domain.ResourceKey, error) {
+	if learner == uuid.Nil {
+		return nil, ErrInvalidResourcePage
+	}
+
+	return s.available(ctx, learner, keys)
+}
+
+func (s *ResourceService) available(ctx context.Context, learner uuid.UUID, keys []domain.ResourceKey) ([]domain.ResourceKey, error) {
 	if len(keys) < 1 || len(keys) > MaxResourcePage {
 		return nil, ErrInvalidResourcePage
 	}
@@ -95,7 +108,13 @@ func (s *ResourceService) Available(ctx context.Context, keys []domain.ResourceK
 		}
 		available[key] = false
 	}
-	current, err := s.store.AvailableResourceVersions(ctx, keys)
+	var current []domain.ResourceAvailability
+	var err error
+	if learner == uuid.Nil {
+		current, err = s.store.AvailableResourceVersions(ctx, keys)
+	} else {
+		current, err = s.store.DiagnosticResourceVersions(ctx, learner, keys)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("load available resource versions: %w", err)
 	}
