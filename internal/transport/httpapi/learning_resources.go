@@ -22,6 +22,8 @@ type resourceRoutes struct {
 	logger  *slog.Logger
 }
 
+const resourceNoStore = "no-store"
+
 func RegisterResources(router Router, service *usecase.ResourceService, token string, logger *slog.Logger) error {
 	if token == "" {
 		return nil
@@ -37,7 +39,7 @@ func RegisterResources(router Router, service *usecase.ResourceService, token st
 	register := func(pattern string, fn http.HandlerFunc) {
 		timed := http.TimeoutHandler(fn, 5*time.Second, `{"code":"SERVICE_UNAVAILABLE","message":"каталог временно недоступен"}`)
 		router.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Cache-Control", resourceNoStore)
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			if !resourceAuthorized(r.Header.Values("Authorization"), expected) {
 				writeJSON(w, http.StatusForbidden, apperror.New(apperror.PermissionDenied, "доступ запрещен", http.StatusForbidden))
@@ -50,6 +52,7 @@ func RegisterResources(router Router, service *usecase.ResourceService, token st
 	register("GET /v1/internal/resources/snapshot", routes.snapshot)
 	register("GET /v1/internal/resources/changes", routes.changes)
 	register("POST /v1/internal/resources/availability", routes.availability)
+	register("POST /v1/internal/resources/diagnostic-eligibility", routes.diagnosticEligibility)
 
 	return nil
 }
@@ -201,6 +204,26 @@ func (h resourceRoutes) changes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h resourceRoutes) availability(w http.ResponseWriter, r *http.Request) {
+	h.available(w, r, uuid.Nil)
+}
+
+func (h resourceRoutes) diagnosticEligibility(w http.ResponseWriter, r *http.Request) {
+	values := r.Header.Values("X-User-ID")
+	if len(values) != 1 {
+		h.writeError(w, usecase.ErrInvalidResourcePage)
+
+		return
+	}
+	learner, err := uuid.Parse(values[0])
+	if err != nil || learner == uuid.Nil || learner.String() != values[0] {
+		h.writeError(w, usecase.ErrInvalidResourcePage)
+
+		return
+	}
+	h.available(w, r, learner)
+}
+
+func (h resourceRoutes) available(w http.ResponseWriter, r *http.Request, learner uuid.UUID) {
 	var input struct {
 		Resources []resourceVersionDTO `json:"resources"`
 	}
@@ -211,7 +234,13 @@ func (h resourceRoutes) availability(w http.ResponseWriter, r *http.Request) {
 	for i, item := range input.Resources {
 		keys[i] = domain.ResourceKey{TaskID: item.TaskID, VersionID: item.VersionID}
 	}
-	available, err := h.service.Available(r.Context(), keys)
+	var available []domain.ResourceKey
+	var err error
+	if learner == uuid.Nil {
+		available, err = h.service.Available(r.Context(), keys)
+	} else {
+		available, err = h.service.DiagnosticEligible(r.Context(), learner, keys)
+	}
 	if err != nil {
 		h.writeError(w, err)
 

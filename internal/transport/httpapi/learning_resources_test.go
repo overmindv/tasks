@@ -45,7 +45,7 @@ func TestResourceRoutesRequireServiceToken(t *testing.T) {
 		}
 		res = httptest.NewRecorder()
 		router.ServeHTTP(res, req)
-		if res.Code != http.StatusForbidden || res.Header().Get("Cache-Control") != "no-store" {
+		if res.Code != http.StatusForbidden || res.Header().Get("Cache-Control") != resourceNoStore {
 			t.Fatal("unauthorized resource request:", res.Code, res.Body.String())
 		}
 	}
@@ -62,6 +62,48 @@ func TestResourceQueryRejectsInvalidParameters(t *testing.T) {
 		if _, err := parseResourceQuery(raw, "cursor"); err == nil {
 			t.Error("invalid resource query accepted:", raw)
 		}
+	}
+}
+
+func TestDiagnosticEligibilityRequiresTrustedActor(t *testing.T) {
+	t.Parallel()
+
+	const endpoint = "/v1/internal/resources/diagnostic-eligibility"
+	const actor = "11111111-2222-4333-8444-555555555555"
+	token := strings.Repeat("x", 32)
+	router := http.NewServeMux()
+	if err := RegisterResources(router, nil, token, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name   string
+		token  string
+		actors []string
+		body   string
+		want   int
+	}{
+		{"untrusted", "wrong", []string{actor}, `{}`, http.StatusForbidden},
+		{"missing actor", token, nil, `{}`, http.StatusBadRequest},
+		{"duplicate actor", token, []string{actor, actor}, `{}`, http.StatusBadRequest},
+		{"invalid actor", token, []string{"not-a-uuid"}, `{}`, http.StatusBadRequest},
+		{"zero actor", token, []string{"00000000-0000-0000-0000-000000000000"}, `{}`, http.StatusBadRequest},
+		{"actor in body", token, []string{actor}, `{"user_id":"` + actor + `"}`, http.StatusBadRequest},
+		{"oversized body", token, []string{actor}, strings.Repeat(" ", 32<<10) + `{}`, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, endpoint, strings.NewReader(tc.body))
+			req.Header.Set("Authorization", "Bearer "+tc.token)
+			for _, value := range tc.actors {
+				req.Header.Add("X-User-ID", value)
+			}
+			res := httptest.NewRecorder()
+			router.ServeHTTP(res, req)
+			if res.Code != tc.want || res.Header().Get("Cache-Control") != resourceNoStore {
+				t.Fatal("unexpected status or cache policy:", res.Code, res.Header())
+			}
+		})
 	}
 }
 
