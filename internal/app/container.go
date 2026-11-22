@@ -53,6 +53,9 @@ func Build(app *parker.App) error {
 	}
 
 	store := postgresadapter.New(pool)
+	if err = registerPrivacy(app, store); err != nil {
+		return err
+	}
 	if executionMetrics != nil {
 		app.AddRunnable("execution-queue-metrics", func(ctx context.Context) error {
 			return executionMetrics.SampleQueue(ctx, store)
