@@ -150,7 +150,7 @@ func TestCandidateApproveIsAtomicAndIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if approved.Task.Status != domain.TaskStatusPublished || approved.Version.TaskType != domain.TaskTypeProgramming {
+	if approved.Task.Status != domain.TaskStatusDraft || approved.Version.TaskType != domain.TaskTypeProgramming {
 		t.Fatalf("unexpected approved task: %+v", approved)
 	}
 	if approved.Version.Title != review.Title || len(approved.Version.Tags) != 1 || approved.Version.Source == nil {

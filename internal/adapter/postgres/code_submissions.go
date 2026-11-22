@@ -64,8 +64,9 @@ func (r *Postgres) InsertCodeSubmission(ctx context.Context, submission domain.C
 	_, err := r.query.Exec(ctx, `
         INSERT INTO code_submissions (
             id, user_id, task_id, task_version_id, execution_id, correlation_id,
-            idempotency_key, request_hash, language, source_file_name, source_code, status, attempts, next_attempt_at, run_mode
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+            idempotency_key, request_hash, language, source_file_name, source_code, status, attempts, next_attempt_at, run_mode, editorial_sequence
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+            CASE WHEN $15='editorial' THEN nextval('editorial_run_order') ELSE NULL END)`,
 		submission.ID,
 		submission.UserID,
 		submission.TaskID,
@@ -121,7 +122,7 @@ func (r *Postgres) ListCodeSubmissions(ctx context.Context, filter domain.CodeSu
 	query := `SELECT ` + codeSubmissionColumns + `
         FROM code_submissions cs
         INNER JOIN task_versions tv ON tv.id = cs.task_version_id
-        WHERE cs.user_id = $1 AND ($2::uuid IS NULL OR cs.task_id = $2)
+        WHERE cs.user_id = $1 AND cs.run_mode <> 'editorial' AND ($2::uuid IS NULL OR cs.task_id = $2)
         ORDER BY cs.created_at DESC, cs.id DESC
         LIMIT $3 OFFSET $4`
 	rows, err := r.query.Query(ctx, query, filter.UserID, filter.TaskID, filter.Limit, filter.Offset)

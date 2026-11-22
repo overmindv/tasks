@@ -56,6 +56,8 @@ func Register(router Router, tasksService *usecase.TaskService, submissionServic
 	router.HandleFunc("GET /v1/tasks/{id}", handler.getPublishedTask)
 
 	router.HandleFunc("POST /v1/admin/code-submissions/{id}/replay", handler.replayCode)
+	router.HandleFunc("POST /v1/admin/tasks/{id}/editorial-runs", handler.submitEditorial)
+	router.HandleFunc("GET /v1/admin/editorial-runs/{id}", handler.getEditorial)
 
 	// Пользовательские решения.
 	router.HandleFunc("POST /v1/tasks/{id}/submissions", handler.submitAnswer)

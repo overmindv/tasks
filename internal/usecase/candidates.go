@@ -120,7 +120,7 @@ func (s *CandidateService) Update(ctx context.Context, id uuid.UUID, review doma
 	return s.Get(ctx, id)
 }
 
-// Approve применяет итоговые правки и атомарно создаёт опубликованную programming-задачу.
+// Approve применяет итоговые правки и создаёт draft для редакционной проверки.
 func (s *CandidateService) Approve(ctx context.Context, id, actorID uuid.UUID, review domain.CandidateReview) (domain.TaskDetail, error) {
 	review = domain.NormalizeCandidateReview(review)
 	if err := domain.ValidateCandidateReview(review); err != nil {
@@ -149,7 +149,7 @@ func (s *CandidateService) Approve(ctx context.Context, id, actorID uuid.UUID, r
 		}
 		taskID = uuid.New()
 		versionID := uuid.New()
-		task := domain.Task{ID: taskID, Status: domain.TaskStatusPublished, CreatedBy: actorID, UpdatedBy: actorID}
+		task := domain.Task{ID: taskID, Status: domain.TaskStatusDraft, CreatedBy: actorID, UpdatedBy: actorID}
 		if err := tx.InsertTask(ctx, task); err != nil {
 			return fmt.Errorf("insert approved task: %w", err)
 		}
@@ -170,7 +170,7 @@ func (s *CandidateService) Approve(ctx context.Context, id, actorID uuid.UUID, r
 		if err := tx.SetCurrentTaskVersion(ctx, taskID, versionID, actorID); err != nil {
 			return fmt.Errorf("set approved task version: %w", err)
 		}
-		// Одобренный кандидат из problem-list становится опубликованным членом списка.
+		// Членство сохраняется, но публичный список скрывает draft до публикации.
 		if candidate.ProblemListID != nil {
 			if err := tx.InsertProblemListMember(ctx, *candidate.ProblemListID, taskID, 0); err != nil {
 				return fmt.Errorf("add approved task to problem list: %w", err)
@@ -178,11 +178,6 @@ func (s *CandidateService) Approve(ctx context.Context, id, actorID uuid.UUID, r
 		}
 		if err := tx.MarkCandidateApproved(ctx, candidate.ID, taskID, actorID, review.ExpectedRevision+1); err != nil {
 			return fmt.Errorf("mark candidate approved: %w", err)
-		}
-		// Одобренный кандидат сразу публикуется (задача создана с статусом published),
-		// поэтому эмитим бизнес-событие для ленты в той же транзакции.
-		if err := emitTaskActivityVersion(ctx, tx, taskID, version); err != nil {
-			return fmt.Errorf("emit task activity for approved candidate: %w", err)
 		}
 
 		return nil

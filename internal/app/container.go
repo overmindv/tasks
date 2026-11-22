@@ -10,6 +10,7 @@ import (
 
 	"github.com/overmindv/parker"
 	postgresadapter "github.com/overmindv/tasks/internal/adapter/postgres"
+	"github.com/overmindv/tasks/internal/adapter/topiccatalog"
 	"github.com/overmindv/tasks/internal/config"
 	"github.com/overmindv/tasks/internal/domain"
 	"github.com/overmindv/tasks/internal/observability"
@@ -80,6 +81,11 @@ func Build(app *parker.App) error {
 		domain.ProgrammingLanguagePython: cfg.PythonVersion,
 		domain.ProgrammingLanguageGo:     cfg.GoVersion,
 	}
+	topics, err := topiccatalog.New(os.Getenv("TASKS_ENTITIES_URL"))
+	if err != nil {
+		return err
+	}
+	taskService.WithPublicationChecks(topics, languageVersions)
 	codeSubmissionService := usecase.NewCodeSubmissionService(store, usecase.CodeExecutionPolicy{
 		MaxPendingPerUser: cfg.AdmissionMaxPerUser, MaxPendingTotal: cfg.AdmissionMaxTotal, AdmissionRetrySeconds: cfg.AdmissionRetrySeconds,
 		RequestsTopic:    cfg.KafkaRequestsTopic,

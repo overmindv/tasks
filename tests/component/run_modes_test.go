@@ -32,9 +32,7 @@ func TestRunModesPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = tasks.ChangeStatus(ctx, task.Task.ID, "published", actor); err != nil {
-		t.Fatal(err)
-	}
+	seedLegacyPublication(t, task.Task.ID, actor)
 	svc := usecase.NewCodeSubmissionService(repo, usecase.CodeExecutionPolicy{RequestsTopic: "requests", RetryGrace: time.Minute, TimeLimit: time.Second, MemoryLimitBytes: 64 << 20})
 	input := usecase.CodeSubmissionInput{TaskVersionID: task.Version.ID, IdempotencyKey: uuid.New(), Language: "python", SourceCode: "print(input())", RunMode: domain.RunModeGraded}
 	if _, err := svc.Submit(ctx, task.Task.ID, user, input); err == nil {
@@ -62,6 +60,7 @@ func TestRunModesPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	input.TaskVersionID = published.TaskVersionID
+	seedLegacyPublication(t, task.Task.ID, actor)
 	input.IdempotencyKey = uuid.New()
 	graded, err := svc.Submit(ctx, task.Task.ID, user, input)
 	if err != nil {

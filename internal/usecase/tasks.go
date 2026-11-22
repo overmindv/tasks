@@ -16,6 +16,16 @@ import (
 // TaskService реализует lifecycle и версионирование тестовых задач.
 type TaskService struct {
 	repository repository.Repository
+	topics     TopicValidator
+	versions   map[domain.ProgrammingLanguage]string
+}
+
+// WithPublicationChecks подключает внешнюю проверку темы и allowlist runtime.
+func (s *TaskService) WithPublicationChecks(topics TopicValidator, versions map[domain.ProgrammingLanguage]string) *TaskService {
+	s.topics = topics
+	s.versions = versions
+
+	return s
 }
 
 // NewTaskService создаёт use-case сервис задач.
@@ -108,6 +118,13 @@ func (s *TaskService) Update(ctx context.Context, taskID uuid.UUID, input domain
 			}
 		}
 		version := buildVersion(taskID, uuid.New(), current.VersionNumber+1, input, actorID)
+		// Сначала скрываем старую публикацию: новый непроверенный ресурс не должен
+		// даже временно появляться в журнале изменений каталога.
+		if task.Status == domain.TaskStatusPublished {
+			if err := tx.SetTaskStatus(ctx, taskID, domain.TaskStatusDraft, actorID); err != nil {
+				return err
+			}
+		}
 		if err := tx.InsertTaskVersion(ctx, version); err != nil {
 			return fmt.Errorf("insert next task version: %w", err)
 		}
@@ -188,6 +205,14 @@ func (s *TaskService) ListPublished(ctx context.Context, filter domain.TaskFilte
 
 // ChangeStatus выполняет разрешённый lifecycle-переход теста.
 func (s *TaskService) ChangeStatus(ctx context.Context, taskID uuid.UUID, status domain.TaskStatus, actorID uuid.UUID) (domain.TaskDetail, error) {
+	var checkedVersion uuid.UUID
+	if status == domain.TaskStatusPublished {
+		var err error
+		checkedVersion, err = s.publicationSnapshot(ctx, taskID)
+		if err != nil {
+			return domain.TaskDetail{}, err
+		}
+	}
 	err := s.repository.WithinTransaction(ctx, func(tx repository.Repository) error {
 		task, err := tx.GetTask(ctx, taskID, true)
 		if err != nil {
@@ -195,6 +220,18 @@ func (s *TaskService) ChangeStatus(ctx context.Context, taskID uuid.UUID, status
 		}
 		if !domain.CanTransition(task.Status, status) {
 			return apperror.New(apperror.InvalidStatusTransition, "недопустимый переход статуса", http.StatusConflict)
+		}
+		if status == domain.TaskStatusPublished {
+			if task.CurrentVersionID == nil || *task.CurrentVersionID != checkedVersion {
+				return publicationError("task version changed; retry publication")
+			}
+			version, err := tx.GetCurrentTaskVersion(ctx, taskID)
+			if err != nil {
+				return err
+			}
+			if err := s.validatePublication(ctx, tx, version); err != nil {
+				return err
+			}
 		}
 		if err := tx.SetTaskStatus(ctx, taskID, status, actorID); err != nil {
 			return fmt.Errorf("set task status: %w", err)

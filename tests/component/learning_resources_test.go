@@ -83,6 +83,11 @@ func TestTaskLearningResourceReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	removed := resourcePage(t, handler, "/changes?after="+strconv.FormatInt(first.Watermark, 10))
+	if len(removed.Changes) != 1 || !removed.Changes[0].Tombstone {
+		t.Fatal("edited version must be hidden before publication", removed)
+	}
+	seedLegacyPublication(t, a.Task.ID, actor)
 	if _, err := tasks.ChangeStatus(ctx, b.Task.ID, domain.TaskStatusArchived, actor); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +108,7 @@ func TestTaskLearningResourceReplay(t *testing.T) {
 		t.Fatal("unpublished task included")
 	}
 
-	after := strconv.FormatInt(first.Watermark, 10)
+	after := strconv.FormatInt(removed.Through, 10)
 	r1 := resourcePage(t, handler, "/changes?limit=1&after="+after)
 	if len(r1.Changes) != 1 || !r1.More || r1.Changes[0].Metadata == nil ||
 		r1.Changes[0].Metadata.VersionID != a2.Version.ID || r1.Changes[0].Metadata.EstimatedMinutes == nil ||
@@ -130,12 +135,13 @@ func TestTaskLearningResourceReplay(t *testing.T) {
 	if err != nil || a3.Version.EstimatedMinutes != nil {
 		t.Fatal("null estimate was not cleared:", err)
 	}
+	seedLegacyPublication(t, a.Task.ID, actor)
 	if err := tasks.Delete(ctx, a.Task.ID, actor); err != nil {
 		t.Fatal(err)
 	}
 	r3 := resourcePage(t, handler, "/changes?after="+strconv.FormatInt(r2.Through, 10))
-	if len(r3.Changes) != 2 || r3.Changes[0].Metadata == nil || r3.Changes[0].Metadata.EstimatedMinutes != nil ||
-		!r3.Changes[1].Tombstone || r3.Changes[1].AggregateID != a.Task.ID {
+	if len(r3.Changes) != 3 || !r3.Changes[0].Tombstone || r3.Changes[1].Metadata == nil || r3.Changes[1].Metadata.EstimatedMinutes != nil ||
+		!r3.Changes[2].Tombstone || r3.Changes[2].AggregateID != a.Task.ID {
 		t.Fatal("missing estimate update or deletion marker:", r3)
 	}
 }
@@ -164,6 +170,12 @@ func TestTaskLearningResourceRequiresGradedRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	hidden := resourcePage(t, handler, "/changes?after="+strconv.FormatInt(before.Watermark, 10))
+	if len(hidden.Changes) != 0 {
+		t.Fatal("suite change must not publish unchecked metadata", hidden)
+	}
+	before.Watermark = hidden.Through
+	seedLegacyPublication(t, task.Task.ID, actor)
 	page := resourcePage(t, handler, "/changes?after="+strconv.FormatInt(before.Watermark, 10))
 	if len(page.Changes) != 1 || page.Changes[0].Metadata == nil {
 		t.Fatal("suite publish must create resource:", page)
@@ -242,9 +254,7 @@ func TestTaskLearningResourceCommitOrder(t *testing.T) {
 	if err := first.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tasks.ChangeStatus(ctx, b.Task.ID, domain.TaskStatusPublished, actor); err != nil {
-		t.Fatal(err)
-	}
+	seedLegacyPublication(t, b.Task.ID, actor)
 	page, err := usecase.NewResourceService(store, nil).Changes(ctx, nil, initial, 10)
 	if err != nil || len(page.Changes) != 1 || page.Through != initial+1 || page.Changes[0].TaskID != b.Task.ID {
 		t.Fatal("rolled back publication leaked into the journal:", page, err)
@@ -271,6 +281,7 @@ func TestTaskDiagnosticEligibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedLegacyPublication(t, edited.Task.ID, author)
 	choice := usecase.NewSubmissionService(store)
 	attempt, err := choice.Submit(ctx, seen.Task.ID, learner, usecase.SubmitInput{
 		TaskVersionID: seen.Version.ID, IdempotencyKey: uuid.New(), SelectedOptionIDs: []uuid.UUID{seen.Version.Options[0].ID},
@@ -282,6 +293,7 @@ func TestTaskDiagnosticEligibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedLegacyPublication(t, seen.Task.ID, author)
 
 	program := createResourceTask(t, tasks, domain.TaskInput{TopicID: &topic, Title: "Code for diagnosis",
 		Statement: "Echo", TaskType: domain.TaskTypeProgramming,
@@ -305,6 +317,7 @@ func TestTaskDiagnosticEligibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	program.Version.ID = published.TaskVersionID
+	seedLegacyPublication(t, program.Task.ID, author)
 
 	handler := resourceTestHandler(t, store, runtimes)
 	keys := []availableResourceKey{{seen.Task.ID, seen.Version.ID}, {next.Task.ID, next.Version.ID},
@@ -425,10 +438,7 @@ func createResourceTask(t testing.TB, svc *usecase.TaskService, input domain.Tas
 		t.Fatal(err)
 	}
 	if publish {
-		task, err = svc.ChangeStatus(t.Context(), task.Task.ID, domain.TaskStatusPublished, actor)
-		if err != nil {
-			t.Fatal(err)
-		}
+		task = seedLegacyPublication(t, task.Task.ID, actor)
 	}
 	return task
 }
