@@ -34,9 +34,7 @@ func TestReplayPostgresAtomicity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = tasksvc.ChangeStatus(ctx, task.Task.ID, "published", actor); err != nil {
-		t.Fatal(err)
-	}
+	seedLegacyPublication(t, task.Task.ID, actor)
 	policy := usecase.CodeExecutionPolicy{RequestsTopic: "requests", RetryGrace: time.Minute, TimeLimit: time.Second, MemoryLimitBytes: 64 << 20}
 	svc := usecase.NewCodeSubmissionService(repo, policy)
 	first, err := svc.Submit(ctx, task.Task.ID, user, usecase.CodeSubmissionInput{TaskVersionID: task.Version.ID, IdempotencyKey: uuid.New(), Language: "python", SourceCode: "print(input())"})

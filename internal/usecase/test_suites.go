@@ -164,6 +164,11 @@ func (s *SuiteService) Publish(ctx context.Context, id uuid.UUID, revision int, 
 			return versionErr
 		}
 		input := domain.TaskInput{TopicID: old.TopicID, Title: old.Title, Statement: old.Statement, TaskType: old.TaskType, Difficulty: old.Difficulty, EstimatedMinutes: old.EstimatedMinutes, Tags: old.Tags, Examples: old.Examples, Constraints: old.Constraints, Source: old.Source}
+		if task.Status == domain.TaskStatusPublished {
+			if statusErr := tx.SetTaskStatus(ctx, d.TaskID, domain.TaskStatusDraft, actor); statusErr != nil {
+				return statusErr
+			}
+		}
 		next := buildVersion(d.TaskID, uuid.New(), old.VersionNumber+1, input, actor)
 		if insertErr := tx.InsertTaskVersion(ctx, next); insertErr != nil {
 			return insertErr

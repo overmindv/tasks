@@ -81,8 +81,9 @@ type ExecutionFailure struct {
 type RunMode string
 
 const (
-	RunModeSamples RunMode = "samples"
-	RunModeGraded  RunMode = "graded"
+	RunModeSamples   RunMode = "samples"
+	RunModeGraded    RunMode = "graded"
+	RunModeEditorial RunMode = "editorial"
 )
 
 type CodeSubmission struct {

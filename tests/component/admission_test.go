@@ -49,9 +49,7 @@ func TestAdmissionPostgres(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = service.ChangeStatus(ctx, task.Task.ID, "published", actor); err != nil {
-			t.Fatal(err)
-		}
+		seedLegacyPublication(t, task.Task.ID, actor)
 		tasks = append(tasks, task)
 	}
 	policy := usecase.CodeExecutionPolicy{RequestsTopic: "requests", RetryGrace: time.Minute, TimeLimit: time.Second, MemoryLimitBytes: 64 << 20, MaxPendingPerUser: 2, MaxPendingTotal: 100000}

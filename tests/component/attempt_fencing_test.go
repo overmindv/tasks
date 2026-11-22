@@ -48,7 +48,7 @@ func TestAttemptFencingPostgres(t *testing.T) {
 		"title": "Attempt fencing", "statement": "Echo", "task_type": "programming", "difficulty": "easy", "options": []any{},
 		"examples": []map[string]any{{"input": "hello", "output": "hello"}},
 	}, http.StatusCreated)
-	componentTaskRequest(t, mux, http.MethodPatch, "/v1/admin/tasks/"+task.ID+"/status", admin, "admin", map[string]string{"status": "published"}, http.StatusOK)
+	seedLegacyPublication(t, uuid.MustParse(task.ID), uuid.MustParse(admin))
 	create := func() domain.CodeSubmission {
 		t.Helper()
 		s, err := svc.Submit(ctx, uuid.MustParse(task.ID), uuid.New(), usecase.CodeSubmissionInput{TaskVersionID: uuid.MustParse(task.TaskVersionID), IdempotencyKey: uuid.New(), Language: domain.ProgrammingLanguagePython, SourceCode: "print(input())"})

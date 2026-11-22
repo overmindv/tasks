@@ -67,10 +67,7 @@ func publishOutcomeFixture(t testing.TB, tasks *usecase.TaskService, author uuid
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err = tasks.ChangeStatus(t.Context(), task.Task.ID, domain.TaskStatusPublished, author)
-	if err != nil {
-		t.Fatal(err)
-	}
+	task = seedLegacyPublication(t, task.Task.ID, author)
 	return task
 }
 
@@ -158,6 +155,7 @@ func TestLearningOutcomeChoiceTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	pick = usecase.SubmitInput{TaskVersionID: next.Version.ID, IdempotencyKey: uuid.New(), SelectedOptionIDs: []uuid.UUID{next.Version.Options[1].ID}}
+	seedLegacyPublication(t, task.Task.ID, author)
 	nextEvent := readOutcome(t, pool, submit(learner).ID)
 	if nextEvent.Payload.FirstIndependentAttempt || nextEvent.Payload.TaskVersionID != next.Version.ID ||
 		!slices.Equal(nextEvent.Payload.TopicIDs, []uuid.UUID{nextTopic}) || nextEvent.Payload.Verdict != domain.ExecutionVerdictAccepted {
@@ -188,6 +186,7 @@ func TestLearningOutcomeGradedCompletion(t *testing.T) {
 	}
 	policy := usecase.CodeExecutionPolicy{LearningOutcomes: true, RequestsTopic: "requests", MaxAttempts: 1, RetryGrace: time.Minute,
 		TimeLimit: time.Second, MemoryLimitBytes: 64 << 20}
+	seedLegacyPublication(t, task.Task.ID, author)
 	code := usecase.NewCodeSubmissionService(store, policy)
 	submit := func(mode domain.RunMode) domain.CodeSubmission {
 		t.Helper()

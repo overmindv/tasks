@@ -71,7 +71,7 @@ func TestVersionedTaskFlow(t *testing.T) {
 	mux := http.NewServeMux()
 	httpapi.Register(
 		mux,
-		usecase.NewTaskService(store),
+		usecase.NewTaskService(store).WithPublicationChecks(activeTopic{}, nil),
 		usecase.NewSubmissionService(store),
 		codeService,
 		usecase.NewCandidateService(store),
@@ -90,7 +90,7 @@ func TestVersionedTaskFlow(t *testing.T) {
 		"statement":  "Какой status означает успех?",
 		"task_type":  "single_choice",
 		"difficulty": "easy",
-		"topic_id":   nil,
+		"topic_id":   uuid.NewString(),
 		"options": []map[string]any{
 			{"text": "200", "is_correct": true},
 			{"text": "500", "is_correct": false},
@@ -114,9 +114,10 @@ func TestVersionedTaskFlow(t *testing.T) {
 		t.Fatal("неправильный ответ не должен быть accepted")
 	}
 
-	// Фаза 4: обновление создаёт версию 2 и оставляет тест опубликованным.
+	// Фаза 4: новая версия требует повторной проверки темы и публикации.
 	updated := componentTaskRequest(t, handler, http.MethodPut, "/v1/admin/tasks/"+created.ID, adminID, "superuser", map[string]any{
 		"title":      "HTTP status updated",
+		"topic_id":   uuid.NewString(),
 		"statement":  "Какой status означает server error?",
 		"task_type":  "single_choice",
 		"difficulty": "easy",
@@ -125,9 +126,10 @@ func TestVersionedTaskFlow(t *testing.T) {
 			{"text": "500", "is_correct": true},
 		},
 	}, http.StatusOK)
-	if updated.VersionNumber != 2 || updated.TaskVersionID == created.TaskVersionID || updated.Status != "published" {
+	if updated.VersionNumber != 2 || updated.TaskVersionID == created.TaskVersionID || updated.Status != "draft" {
 		t.Fatalf("updated task = %#v", updated)
 	}
+	componentTaskRequest(t, handler, http.MethodPatch, "/v1/admin/tasks/"+created.ID+"/status", adminID, "admin", map[string]string{"status": "published"}, http.StatusOK)
 
 	// Фаза 5: правильный ответ по СТАРОЙ версии — корректен с task_updated=true.
 	oldResult := componentSubmissionRequest(t, handler, "/v1/tasks/"+created.ID+"/submissions", userID, map[string]any{
@@ -167,7 +169,8 @@ func TestVersionedTaskFlow(t *testing.T) {
 			{"input": "hello", "output": "hello", "explanation": "echo"},
 		},
 	}, http.StatusCreated)
-	componentTaskRequest(t, handler, http.MethodPatch, "/v1/admin/tasks/"+programming.ID+"/status", adminID, "admin", map[string]string{"status": "published"}, http.StatusOK)
+	// Историческая samples-задача остаётся решаемой после включения нового gate.
+	seedLegacyPublication(t, uuid.MustParse(programming.ID), uuid.MustParse(adminID))
 	code := componentCodeSubmissionRequest(t, handler, programming, userID)
 	if code.Status != "queued" || code.Verdict != "" {
 		t.Fatalf("queued code submission = %#v", code)

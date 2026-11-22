@@ -233,7 +233,7 @@ paths:
         "409": { $ref: "#/components/responses/Conflict" }
   /v1/admin/task-candidates/{id}/approve:
     post:
-      summary: Атомарно опубликовать programming-задачу
+      summary: Одобрить кандидата и создать programming-черновик
       parameters:
         - $ref: "#/components/parameters/TaskID"
         - $ref: "#/components/parameters/UserID"
@@ -445,6 +445,64 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CodeSubmissionList"
+  /v1/admin/tasks/{id}/editorial-runs:
+    post:
+      summary: Проверить эталонное решение текущего черновика через sandbox
+      description: Только admin/superuser. Результат не является учебной попыткой. Polling по GET /v1/admin/editorial-runs/{id}.
+      parameters:
+        - $ref: "#/components/parameters/TaskID"
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRoles"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [task_version_id, idempotency_key, language, source_code]
+              properties:
+                task_version_id: {type: string, format: uuid}
+                idempotency_key: {type: string, format: uuid}
+                language: {$ref: "#/components/schemas/ProgrammingLanguage"}
+                source_code: {type: string, description: UTF-8 не более 256 KiB}
+      responses:
+        "202":
+          description: Запуск поставлен в очередь
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status]
+                properties:
+                  id: {type: string, format: uuid}
+                  status: {type: string, enum: [queued, completed]}
+        "400": {description: Некорректный код или запрос}
+        "403": {description: Требуется администратор}
+        "409": {description: Версия, статус или suite не позволяют редакционную проверку}
+        "429": {description: Очередь исполнения заполнена}
+  /v1/admin/editorial-runs/{id}:
+    get:
+      summary: Прочитать безопасный статус редакционного запуска
+      parameters:
+        - $ref: "#/components/parameters/TaskID"
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRoles"
+      responses:
+        "200":
+          description: ID, версия, status и verdict без исходников или вывода
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, task_version_id, status, verdict]
+                properties:
+                  id: {type: string, format: uuid}
+                  task_version_id: {type: string, format: uuid}
+                  status: {type: string, enum: [queued, completed]}
+                  verdict: {type: string, nullable: true}
+        "403": {description: Требуется администратор}
+        "404": {description: Редакционный запуск не найден}
   /v1/admin/tasks/{id}/suite-drafts:
     post:
       summary: Создать приватный draft

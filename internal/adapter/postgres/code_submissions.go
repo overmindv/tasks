@@ -121,7 +121,7 @@ func (r *Postgres) ListCodeSubmissions(ctx context.Context, filter domain.CodeSu
 	query := `SELECT ` + codeSubmissionColumns + `
         FROM code_submissions cs
         INNER JOIN task_versions tv ON tv.id = cs.task_version_id
-        WHERE cs.user_id = $1 AND ($2::uuid IS NULL OR cs.task_id = $2)
+        WHERE cs.user_id = $1 AND cs.run_mode <> 'editorial' AND ($2::uuid IS NULL OR cs.task_id = $2)
         ORDER BY cs.created_at DESC, cs.id DESC
         LIMIT $3 OFFSET $4`
 	rows, err := r.query.Query(ctx, query, filter.UserID, filter.TaskID, filter.Limit, filter.Offset)

@@ -58,6 +58,12 @@ docker build -t tasks:local .
 
 ## Контракты
 
+Публикация требует активную тему из `TASKS_ENTITIES_URL`. Для programming также
+нужны атрибуция источника, immutable suite и успешный редакционный запуск
+текущей версии. Одобрение кандидата создаёт черновик. Изменение опубликованной
+задачи возвращает её в черновик. Порядок работы администратора, API и rollout:
+[редакционные проверки OVM-252](docs/changes/OVM-252.md).
+
 - HTTP API: [`api/openapi.yaml`](api/openapi.yaml);
 - Kafka request/result JSON Schema: каталог [`api/events`](api/events);
 - архитектура: [`docs/architecture.md`](docs/architecture.md);

@@ -106,10 +106,24 @@ func NewCodeSubmissionService(store repository.Repository, policy CodeExecutionP
 
 // Submit валидирует файл и атомарно сохраняет решение вместе с Kafka outbox event.
 func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.UUID, input CodeSubmissionInput) (domain.CodeSubmission, error) {
+	return s.submit(ctx, taskID, userID, input, false)
+}
+
+// SubmitEditorial допускает только проверенного администратора, без учебного результата.
+func (s *CodeSubmissionService) SubmitEditorial(ctx context.Context, taskID, actorID uuid.UUID, input CodeSubmissionInput, admin bool) (domain.CodeSubmission, error) {
+	if !admin || actorID == uuid.Nil {
+		return domain.CodeSubmission{}, apperror.New(apperror.PermissionDenied, "administrator required", 403)
+	}
+	input.RunMode = domain.RunModeEditorial
+
+	return s.submit(ctx, taskID, actorID, input, true)
+}
+
+func (s *CodeSubmissionService) submit(ctx context.Context, taskID, userID uuid.UUID, input CodeSubmissionInput, editorial bool) (domain.CodeSubmission, error) {
 	if input.RunMode == "" {
 		input.RunMode = domain.RunModeSamples
 	}
-	if input.RunMode != domain.RunModeSamples && input.RunMode != domain.RunModeGraded {
+	if input.RunMode != domain.RunModeSamples && input.RunMode != domain.RunModeGraded && (!editorial || input.RunMode != domain.RunModeEditorial) {
 		return domain.CodeSubmission{}, apperror.New(apperror.ValidationError, "invalid run_mode", 400)
 	}
 	if input.SourceFileName == "" {
@@ -158,7 +172,7 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 		if taskErr != nil {
 			return fmt.Errorf("get task for code submission: %w", taskErr)
 		}
-		if task.Status != domain.TaskStatusPublished {
+		if (!editorial && task.Status != domain.TaskStatusPublished) || (editorial && (task.Status != domain.TaskStatusDraft || task.CurrentVersionID == nil || *task.CurrentVersionID != input.TaskVersionID)) {
 			return apperror.New(apperror.TaskNotAvailable, "задача недоступна для решения", http.StatusConflict)
 		}
 		version, versionErr := tx.GetTaskVersion(ctx, taskID, input.TaskVersionID)
@@ -175,6 +189,9 @@ func (s *CodeSubmissionService) Submit(ctx context.Context, taskID, userID uuid.
 		suite, suiteErr := executionSuite(ctx, tx, taskID, version.ID, input.RunMode, input.Language)
 		if suiteErr != nil {
 			return suiteErr
+		}
+		if editorial && (suite == nil || s.policy.LanguageVersions[suite.Definition.Language] != suite.Definition.LanguageVersion) {
+			return publicationError("suite runtime not configured")
 		}
 		now := time.Now().UTC()
 		submission = domain.CodeSubmission{
@@ -278,8 +295,24 @@ func (s *CodeSubmissionService) Get(ctx context.Context, submissionID, actorID u
 	if err != nil {
 		return domain.CodeSubmission{}, fmt.Errorf("get code submission: %w", err)
 	}
-	if !admin && submission.UserID != actorID {
+	if submission.RunMode == domain.RunModeEditorial || (!admin && submission.UserID != actorID) {
 		return domain.CodeSubmission{}, apperror.New(apperror.PermissionDenied, "нет доступа к результату запуска", http.StatusForbidden)
+	}
+
+	return domain.PublicCodeSubmission(submission), nil
+}
+
+// GetEditorial изолирует редакционный результат от public/gateway DTO решений.
+func (s *CodeSubmissionService) GetEditorial(ctx context.Context, id, actorID uuid.UUID, admin bool) (domain.CodeSubmission, error) {
+	if !admin || actorID == uuid.Nil {
+		return domain.CodeSubmission{}, apperror.New(apperror.PermissionDenied, "administrator required", 403)
+	}
+	submission, err := s.repository.GetCodeSubmission(ctx, id)
+	if err != nil {
+		return domain.CodeSubmission{}, err
+	}
+	if submission.RunMode != domain.RunModeEditorial {
+		return domain.CodeSubmission{}, apperror.New(apperror.CodeSubmissionNotFound, "editorial run not found", 404)
 	}
 
 	return domain.PublicCodeSubmission(submission), nil
@@ -895,7 +928,7 @@ func sameModeSubmission(s domain.CodeSubmission, hash, legacy string, mode domai
 	return sameIdempotentCodeSubmission(s, hash)
 }
 func executionSuite(ctx context.Context, repo repository.Repository, taskID, versionID uuid.UUID, mode domain.RunMode, language domain.ProgrammingLanguage) (*domain.PublishedSuite, error) {
-	if mode != domain.RunModeGraded {
+	if mode != domain.RunModeGraded && mode != domain.RunModeEditorial {
 		return nil, nil
 	}
 	suite, err := repo.GetPublishedSuite(ctx, taskID, versionID)
