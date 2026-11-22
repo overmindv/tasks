@@ -72,11 +72,13 @@ func (r *Postgres) AccountExport(ctx context.Context, userID uuid.UUID, cursor, 
 		encoded, encodeErr := json.Marshal(record)
 		if encodeErr != nil {
 			rows.Close()
+
 			return result, encodeErr
 		}
 		if len(result.Records) == limit || size+len(encoded)+1 > exportPageBytes-1024 {
 			if len(result.Records) == 0 {
 				rows.Close()
+
 				return result, domain.ErrOutcomeSnapshot
 			}
 			result.NextCursor = strconv.FormatInt(last, 10)
