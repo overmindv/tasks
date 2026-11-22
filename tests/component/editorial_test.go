@@ -70,6 +70,13 @@ func TestEditorialPublicationPostgres(t *testing.T) {
 	run("wrong", 1)
 	publish(false)
 	run("PRIVATE_INPUT", 2)
+	// Часы реплик могут расходиться: старый accepted не должен обойти новый run.
+	if _, err := pool.Exec(ctx, `UPDATE code_submissions SET created_at=created_at+interval '1 day' WHERE task_version_id=$1 AND verdict='accepted'`, suite.TaskVersionID); err != nil {
+		t.Fatal(err)
+	}
+	run("wrong", 3)
+	publish(false)
+	run("PRIVATE_INPUT", 4)
 	publish(true)
 	updated, err := tasks.Update(ctx, task.Task.ID, domain.TaskInput{Title: "Changed", Statement: "New statement", TaskType: domain.TaskTypeProgramming, Difficulty: domain.DifficultyEasy, TopicID: &topic}, actor)
 	if err != nil || updated.Task.Status != domain.TaskStatusDraft {

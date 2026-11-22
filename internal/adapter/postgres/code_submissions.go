@@ -64,8 +64,9 @@ func (r *Postgres) InsertCodeSubmission(ctx context.Context, submission domain.C
 	_, err := r.query.Exec(ctx, `
         INSERT INTO code_submissions (
             id, user_id, task_id, task_version_id, execution_id, correlation_id,
-            idempotency_key, request_hash, language, source_file_name, source_code, status, attempts, next_attempt_at, run_mode
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+            idempotency_key, request_hash, language, source_file_name, source_code, status, attempts, next_attempt_at, run_mode, editorial_sequence
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+            CASE WHEN $15='editorial' THEN nextval('editorial_run_order') ELSE NULL END)`,
 		submission.ID,
 		submission.UserID,
 		submission.TaskID,
