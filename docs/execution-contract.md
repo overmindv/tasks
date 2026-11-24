@@ -124,3 +124,21 @@ stdout/stderr и sandbox error.code/message никогда не публикую
 sandbox и её фактический retention cleanup отдельно не аудированы. Добавления
 SQL/HTTP/GraphQL schema не требуется; старые результаты без marker показывают
 aggregate, а не вывод кейсов. При rollback старого бинарника защита теряется.
+
+## SQLite (OVM-330)
+
+Язык `sqlite` использует тот же wire-контракт без новых полей:
+
+- `language.id="sqlite"`, `language.version` берётся из suite
+  (`CODE_EXECUTION_SQLITE_VERSION`, по умолчанию `3.46`);
+- `code.files` — ровно один `solution.sql` (entrypoint), текст запроса до 64 KiB;
+- `execution.suite` — ссылка на опубликованный набор, `execution.inputs` пуст:
+  sandbox сам читает `sandbox.inputs.v1` из object storage;
+- каждый `inputs[i]` — JSON-набор кейса `{"ordered": bool, "tables": [...]}`;
+- stdout — JSON-массив строк результата; tasks сравнивает его чекером `sqlite_rows`
+  с учётом дублей, порядок проверяется только при `ordered=true`.
+
+SQLite принимается только для версии задания с опубликованным sqlite-suite:
+в режиме `samples` (без suite) отправка отклоняется. Эталоны и наборы данных
+остаются в tasks; sandbox получает только stdin-кейсы. Для скрытых кейсов вывод
+не возвращается пользователю (существующее правило privacy).
