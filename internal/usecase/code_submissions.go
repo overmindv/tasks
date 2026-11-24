@@ -190,6 +190,11 @@ func (s *CodeSubmissionService) submit(ctx context.Context, taskID, userID uuid.
 		if suiteErr != nil {
 			return suiteErr
 		}
+		// SQLite принимается только для версии задания с опубликованным набором:
+		// без suite неизвестны ни учебные данные, ни эталон строк.
+		if input.Language == domain.ProgrammingLanguageSQLite && suite == nil {
+			return apperror.New(apperror.TaskNotExecutable, "sqlite требует опубликованный набор задания", http.StatusConflict)
+		}
 		if editorial && (suite == nil || s.policy.LanguageVersions[suite.Definition.Language] != suite.Definition.LanguageVersion) {
 			return publicationError("suite runtime not configured")
 		}
@@ -642,6 +647,8 @@ func languageVersion(policy CodeExecutionPolicy, language domain.ProgrammingLang
 	switch language {
 	case domain.ProgrammingLanguageGo:
 		return "1.26"
+	case domain.ProgrammingLanguageSQLite:
+		return "3.46"
 	default:
 		return "3.12"
 	}
@@ -727,7 +734,7 @@ func runLevelVerdict(result execution.RunResult) (domain.ExecutionVerdict, []dom
 
 // caseVerdict выводит вердикт одного кейса: лимиты/рантайм из статуса песочницы,
 // иначе — сравнение stdout с ожидаемым выводом открытого примера.
-func caseVerdict(run execution.CaseRunResult, expectedOutput string, checker ...string) domain.ExecutionVerdict {
+func caseVerdict(run execution.CaseRunResult, expected domain.TaskExample, checker ...string) domain.ExecutionVerdict {
 	switch run.Status {
 	case execution.ResultStatusTimeLimit:
 		return domain.ExecutionVerdictTimeLimitExceeded
@@ -754,7 +761,11 @@ func caseVerdict(run execution.CaseRunResult, expectedOutput string, checker ...
 	if run.ExitCode != nil && *run.ExitCode != 0 {
 		return domain.ExecutionVerdictRuntimeError
 	}
+	if len(checker) > 0 && checker[0] == domain.SQLiteChecker {
+		return sqliteVerdict(run.Stdout, expected)
+	}
 	actual := run.Stdout
+	expectedOutput := expected.Output
 	if len(checker) == 0 || checker[0] != "exact" {
 		actual = strings.TrimRight(actual, "\r\n")
 		expectedOutput = strings.TrimRight(expectedOutput, "\r\n")
@@ -766,13 +777,31 @@ func caseVerdict(run execution.CaseRunResult, expectedOutput string, checker ...
 	return domain.ExecutionVerdictWrongAnswer
 }
 
-// expectedAt возвращает эталон кейса по индексу (индексы совпадают с порядком открытых примеров).
-func expectedAt(expected []domain.TaskExample, index int) string {
-	if index >= 0 && index < len(expected) {
-		return expected[index].Output
+// sqliteVerdict сравнивает строки результата с учётом дублей и настройки порядка.
+// Невалидный эталон — ошибка checker'а, а не неверное решение пользователя.
+func sqliteVerdict(actual string, expected domain.TaskExample) domain.ExecutionVerdict {
+	ordered, err := domain.ParseSQLiteFixture(expected.Input)
+	if err != nil {
+		return domain.ExecutionVerdictCheckerError
+	}
+	match, err := domain.SQLiteRowsMatch(actual, expected.Output, ordered)
+	if err != nil {
+		return domain.ExecutionVerdictCheckerError
+	}
+	if match {
+		return domain.ExecutionVerdictAccepted
 	}
 
-	return ""
+	return domain.ExecutionVerdictWrongAnswer
+}
+
+// expectedAt возвращает эталон кейса по индексу (индексы совпадают с порядком открытых примеров).
+func expectedAt(expected []domain.TaskExample, index int) domain.TaskExample {
+	if index >= 0 && index < len(expected) {
+		return expected[index]
+	}
+
+	return domain.TaskExample{}
 }
 
 // verdictPriority задаёт порядок значимости вердиктов: выше — серьёзнее.

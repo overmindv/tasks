@@ -20,6 +20,7 @@ type codeSubmissionMemoryRepository struct {
 	repository.Repository
 	task        domain.Task
 	version     domain.TaskVersion
+	suite       *domain.PublishedSuite
 	submissions map[uuid.UUID]domain.CodeSubmission
 	outbox      []domain.OutboxMessage
 	inbox       map[string]domain.ExecutionInboxRecord
@@ -45,6 +46,11 @@ func (r *codeSubmissionMemoryRepository) GetTaskVersion(_ context.Context, _, ve
 	}
 
 	return r.version, nil
+}
+
+// GetPublishedSuite возвращает подготовленный suite задания.
+func (r *codeSubmissionMemoryRepository) GetPublishedSuite(_ context.Context, _, _ uuid.UUID) (*domain.PublishedSuite, error) {
+	return r.suite, nil
 }
 
 // FindCodeSubmissionByIdempotency ищет запуск по ключу пользователя.
@@ -818,6 +824,7 @@ func newCodeSubmissionService() (*codeSubmissionMemoryRepository, *CodeSubmissio
 		LanguageVersions: map[domain.ProgrammingLanguage]string{
 			domain.ProgrammingLanguagePython: "3.12",
 			domain.ProgrammingLanguageGo:     "1.26",
+			domain.ProgrammingLanguageSQLite: "3.46",
 		},
 	})
 
