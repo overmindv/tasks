@@ -122,6 +122,48 @@ func TestProblemListMembersFollowCollectionOrderAndVisibility(t *testing.T) {
 	if public.Members[0].TaskID != taskIDs[0] {
 		t.Fatalf("нарушен порядок списка: %+v", public.Members)
 	}
+
+	// Soft delete убирает задачу из публичной выдачи и счётчика, но не из состава.
+	if _, err := pool.Exec(ctx, `UPDATE tasks SET deleted_at=now() WHERE id=$1`, taskIDs[1]); err != nil {
+		t.Fatal(err)
+	}
+	public, err = lists.Get(ctx, listID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if public.MemberCount != 1 || len(public.Members) != 1 || public.Members[0].TaskID != taskIDs[0] {
+		t.Fatalf("публичный список раскрывает удалённую задачу: %+v", public)
+	}
+	admin, err = lists.Get(ctx, listID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admin.MemberCount != len(items) {
+		t.Fatalf("администратор не видит удалённую задачу: %+v", admin)
+	}
+	if count := summaryMemberCount(t, ctx, lists, false, listID); count != 1 {
+		t.Fatalf("публичный счётчик списка %d, ожидалось 1", count)
+	}
+	if count := summaryMemberCount(t, ctx, lists, true, listID); count != len(items) {
+		t.Fatalf("административный счётчик списка %d, ожидалось %d", count, len(items))
+	}
+}
+
+// summaryMemberCount находит список в журнале и возвращает его счётчик членов.
+func summaryMemberCount(t *testing.T, ctx context.Context, lists *usecase.ProblemListService, admin bool, listID uuid.UUID) int {
+	t.Helper()
+	items, err := lists.List(ctx, 100, 0, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if item.ID == listID {
+			return item.MemberCount
+		}
+	}
+	t.Fatalf("список %s не найден в журнале", listID)
+
+	return 0
 }
 
 func problemListStore(t *testing.T, ctx context.Context) (*pgxpool.Pool, *postgresadapter.Postgres) {
@@ -135,7 +177,7 @@ func problemListStore(t *testing.T, ctx context.Context) (*pgxpool.Pool, *postgr
 	return pool, postgresadapter.New(pool)
 }
 
-// problemListItems собирает два кандидата одного частично собранного списка.
+// candidateRef возвращает id и revision импортированного кандидата.
 func candidateRef(t *testing.T, ctx context.Context, pool *pgxpool.Pool, externalID string) (uuid.UUID, int) {
 	t.Helper()
 	var id uuid.UUID
@@ -147,6 +189,7 @@ func candidateRef(t *testing.T, ctx context.Context, pool *pgxpool.Pool, externa
 	return id, revision
 }
 
+// problemListItems собирает два кандидата одного частично собранного списка.
 func problemListItems(url string, jobID uuid.UUID) []domain.CandidateImport {
 	list := &domain.ProblemListImport{Name: "Component list", SourceID: "leetcode", SourceURL: url, Truncated: true}
 	return []domain.CandidateImport{
