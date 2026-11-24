@@ -38,12 +38,14 @@ type TaskCandidate struct {
 	Examples          []TaskExample
 	Constraints       []string
 	ProblemListID     *uuid.UUID
-	ApprovedTaskID    *uuid.UUID
-	ReviewedBy        *uuid.UUID
-	ReviewedAt        *time.Time
-	RejectionReason   string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	// ProblemListPosition — место кандидата в порядке сбора списка.
+	ProblemListPosition *int
+	ApprovedTaskID      *uuid.UUID
+	ReviewedBy          *uuid.UUID
+	ReviewedAt          *time.Time
+	RejectionReason     string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // CandidateImport описывает service-to-service payload от task-hunter.
@@ -63,6 +65,9 @@ type CandidateImport struct {
 	Examples          []TaskExample
 	Constraints       []string
 	ProblemList       *ProblemListImport
+	// ProblemListPosition — место задачи в порядке сбора списка.
+	// Если не задано, импорт присваивает позицию по порядку batch.
+	ProblemListPosition *int
 }
 
 // CandidateReview содержит редактируемые администратором поля кандидата.
@@ -129,6 +134,9 @@ func ValidateCandidateImport(input CandidateImport) error {
 		if err := ValidateProblemListImport(*input.ProblemList); err != nil {
 			return err
 		}
+	}
+	if input.ProblemListPosition != nil && *input.ProblemListPosition < 0 {
+		return fmt.Errorf("problem_list_position не может быть отрицательным")
 	}
 
 	return ValidateTaskInput(TaskInput{
