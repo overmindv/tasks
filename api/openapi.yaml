@@ -193,6 +193,27 @@ paths:
           description: Результат каждого элемента — imported, duplicate, invalid или error
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /v1/internal/task-activity/changes:
+    get:
+      summary: Страница durable-журнала публикаций задач для Feed
+      parameters:
+        - $ref: "#/components/parameters/ServiceAuthorization"
+        - name: watermark
+          in: query
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: after
+          in: query
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200":
+          description: Записи после курсора в границах watermark
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /v1/admin/task-candidates:
     get:
       summary: Получить очередь кандидатов
