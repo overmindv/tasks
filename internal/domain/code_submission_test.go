@@ -17,6 +17,8 @@ func TestValidateSourceFile(t *testing.T) {
 	}{
 		{name: "python", language: ProgrammingLanguagePython, fileName: "main.py", code: "print(input())"},
 		{name: "go", language: ProgrammingLanguageGo, fileName: "main.go", code: "package main"},
+		{name: "sqlite", language: ProgrammingLanguageSQLite, fileName: "solution.sql", code: "SELECT 1"},
+		{name: "sqlite wrong extension", language: ProgrammingLanguageSQLite, fileName: "solution.py", code: "SELECT 1", wantErr: true},
 		{name: "wrong extension", language: ProgrammingLanguagePython, fileName: "main.go", code: "print()", wantErr: true},
 		{name: "unknown language", language: ProgrammingLanguage("javascript"), fileName: "main.js", code: "console.log()", wantErr: true},
 		{name: "nul byte", language: ProgrammingLanguageGo, fileName: "main.go", code: "package\x00main", wantErr: true},

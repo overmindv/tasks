@@ -12,6 +12,12 @@ import (
 )
 
 // SuiteDefinition — полный закрытый snapshot; никогда не включается в public Task DTO.
+// Чекеры вывода, поддерживаемые версией задания.
+const (
+	CheckerExact        = "exact"
+	CheckerTrimNewlines = "trim_newlines"
+)
+
 type SuiteDefinition struct {
 	Language        ProgrammingLanguage `json:"language"`
 	LanguageVersion string              `json:"language_version"`
@@ -56,11 +62,21 @@ type SuiteDraft struct {
 
 // ValidateSuite ограничивает данные до записи и до публикации, без значений в ошибке.
 func ValidateSuite(s SuiteDefinition, requireHidden bool) error {
-	if (s.Language != ProgrammingLanguagePython && s.Language != ProgrammingLanguageGo) || !regexp.MustCompile(`^[0-9]+\.[0-9]+(\.[0-9]+)?$`).MatchString(s.LanguageVersion) {
+	if !regexp.MustCompile(`^[0-9]+\.[0-9]+(\.[0-9]+)?$`).MatchString(s.LanguageVersion) {
 		return errors.New("invalid suite language")
 	}
-	if s.Checker != "exact" && s.Checker != "trim_newlines" {
-		return errors.New("unsupported suite checker")
+	switch s.Language {
+	case ProgrammingLanguagePython, ProgrammingLanguageGo:
+		if s.Checker != CheckerExact && s.Checker != CheckerTrimNewlines {
+			return errors.New("unsupported suite checker")
+		}
+	case ProgrammingLanguageSQLite:
+		// Для SQL сравниваются строки результата, побайтовое сравнение не подходит.
+		if s.Checker != SQLiteChecker {
+			return errors.New("unsupported suite checker")
+		}
+	default:
+		return errors.New("invalid suite language")
 	}
 	l := s.Limits
 	if l.CPUms < 100 || l.CPUms > 30000 || l.Wallms < l.CPUms || l.Wallms > 60000 || l.MemoryMB < 16 || l.MemoryMB > 1024 || l.PIDs < 1 || l.PIDs > 128 || l.StdoutBytes < 1 || l.StdoutBytes > 65536 || l.StderrBytes < 1 || l.StderrBytes > 65536 || l.WorkspaceBytes < 1048576 || l.WorkspaceBytes > 10485760 {
@@ -81,6 +97,14 @@ func ValidateSuite(s SuiteDefinition, requireHidden bool) error {
 		size += len(c.Input) + len(c.Output)
 		if !utf8.ValidString(c.Input) || !utf8.ValidString(c.Output) || len(c.Input) > 65536 || len(c.Output) > 65536 {
 			return errors.New("invalid suite case size")
+		}
+		if s.Language == ProgrammingLanguageSQLite {
+			if _, fixtureErr := ParseSQLiteFixture(c.Input); fixtureErr != nil {
+				return errors.New("invalid sqlite fixture")
+			}
+			if rowsErr := ValidateSQLiteRows(c.Output); rowsErr != nil {
+				return errors.New("invalid sqlite expected rows")
+			}
 		}
 	}
 	if size > 1048576 {
