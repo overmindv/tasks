@@ -121,6 +121,9 @@ func Build(app *parker.App) error {
 	if registerErr := httpapi.RegisterResources(app.HTTP(), usecase.NewResourceService(store, languageVersions), cfg.ResourceToken, app.Logger()); registerErr != nil {
 		return registerErr
 	}
+	if registerErr := httpapi.RegisterTaskActivity(app.HTTP(), usecase.NewTaskActivityService(store), cfg.ActivityToken, app.Logger()); registerErr != nil {
+		return registerErr
+	}
 	var suiteObjects usecase.SuiteObjectStore
 	if os.Getenv("TASKS_SUITE_S3_ENDPOINT") != "" || os.Getenv("TASKS_SUITE_S3_BUCKET") != "" || os.Getenv("TASKS_SUITE_S3_ACCESS_KEY_ID") != "" || os.Getenv("TASKS_SUITE_S3_SECRET_ACCESS_KEY") != "" {
 		suiteObjects, err = suitestore.New(suitestore.Config{Endpoint: os.Getenv("TASKS_SUITE_S3_ENDPOINT"), Region: os.Getenv("TASKS_SUITE_S3_REGION"), Bucket: os.Getenv("TASKS_SUITE_S3_BUCKET"), AccessKey: os.Getenv("TASKS_SUITE_S3_ACCESS_KEY_ID"), SecretKey: os.Getenv("TASKS_SUITE_S3_SECRET_ACCESS_KEY"), Prefix: os.Getenv("TASKS_SUITE_S3_PREFIX")})
