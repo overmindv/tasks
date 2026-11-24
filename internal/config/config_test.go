@@ -27,6 +27,7 @@ func TestConfigValidate(t *testing.T) {
 		ExecutionReaperInterval: 30 * time.Second,
 		PythonVersion:           "3.12",
 		GoVersion:               "1.26",
+		SQLiteVersion:           "3.46",
 	}
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)

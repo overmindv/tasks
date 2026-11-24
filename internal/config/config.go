@@ -25,6 +25,7 @@ const (
 	defaultWorkspaceBytes = 1048576
 	defaultPythonVersion  = "3.12"
 	defaultGoVersion      = "1.26"
+	defaultSQLiteVersion  = "3.46"
 	// defaultExecutionMaxAttempts лимитирует число переотправок запуска в sandbox (включая первичную).
 	defaultExecutionMaxAttempts = 3
 	// defaultExecutionRetryGrace — окно, после которого reaper считает queued-запуск заброшенным.
@@ -58,6 +59,7 @@ type Config struct {
 	ExecutionReaperInterval time.Duration
 	PythonVersion           string
 	GoVersion               string
+	SQLiteVersion           string
 }
 
 // Load читает, нормализует и проверяет бизнес-конфигурацию окружения.
@@ -143,6 +145,7 @@ func Load() (Config, error) {
 		ExecutionReaperInterval: reaperInterval,
 		PythonVersion:           env("CODE_EXECUTION_PYTHON_VERSION", defaultPythonVersion),
 		GoVersion:               env("CODE_EXECUTION_GO_VERSION", defaultGoVersion),
+		SQLiteVersion:           env("CODE_EXECUTION_SQLITE_VERSION", defaultSQLiteVersion),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -193,8 +196,8 @@ func (c Config) Validate() error {
 	if c.ExecutionStdoutBytes < 0 || c.ExecutionStderrBytes < 0 || c.ExecutionWorkspaceBytes <= 0 {
 		return errors.New("лимиты размера вывода должны быть неотрицательными, workspace — положительным")
 	}
-	if c.PythonVersion == "" || c.GoVersion == "" {
-		return errors.New("версии рантайма python и go не должны быть пустыми")
+	if c.PythonVersion == "" || c.GoVersion == "" || c.SQLiteVersion == "" {
+		return errors.New("версии рантайма python, go и sqlite не должны быть пустыми")
 	}
 	if c.ExecutionMaxAttempts < 1 {
 		return errors.New("CODE_EXECUTION_MAX_ATTEMPTS должен быть не меньше 1")
