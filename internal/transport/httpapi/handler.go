@@ -50,8 +50,11 @@ func Register(router Router, tasksService *usecase.TaskService, submissionServic
 	router.HandleFunc("POST /v1/admin/task-candidates/{id}/approve", handler.approveCandidate)
 	router.HandleFunc("POST /v1/admin/task-candidates/{id}/reject", handler.rejectCandidate)
 	router.HandleFunc("POST /v1/internal/task-candidates/batch", handler.importCandidates)
-	router.HandleFunc("GET /v1/admin/problem-lists", handler.listProblemLists)
-	router.HandleFunc("GET /v1/admin/problem-lists/{id}", handler.getProblemList)
+	router.HandleFunc("GET /v1/admin/problem-lists", handler.listAdminProblemLists)
+	router.HandleFunc("GET /v1/admin/problem-lists/{id}", handler.getAdminProblemList)
+	// Публичная выдача списков: только опубликованные задачи.
+	router.HandleFunc("GET /v1/problem-lists", handler.listProblemLists)
+	router.HandleFunc("GET /v1/problem-lists/{id}", handler.getProblemList)
 	router.HandleFunc("GET /v1/tasks", handler.listPublishedTasks)
 	router.HandleFunc("GET /v1/tasks/{id}", handler.getPublishedTask)
 

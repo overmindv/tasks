@@ -32,12 +32,16 @@ type candidateImportInput struct {
 	Examples          []exampleInput     `json:"examples"`
 	Constraints       []string           `json:"constraints"`
 	ProblemList       *problemListImport `json:"problem_list"`
+	// ProblemListPosition — место задачи в списке; при отсутствии импорт
+	// присваивает позицию по порядку batch.
+	ProblemListPosition *int `json:"problem_list_position"`
 }
 
 type problemListImport struct {
 	Name      string `json:"name"`
 	SourceID  string `json:"source_id"`
 	SourceURL string `json:"source_url"`
+	Truncated bool   `json:"truncated"`
 }
 
 type candidateReviewInput struct {
@@ -111,12 +115,14 @@ func (h *Handler) importCandidates(w http.ResponseWriter, r *http.Request) {
 			Examples: lo.Map(item.Examples, func(example exampleInput, _ int) domain.TaskExample {
 				return domain.TaskExample{Input: example.Input, Output: example.Output, Explanation: example.Explanation}
 			}),
+			ProblemListPosition: item.ProblemListPosition,
 		}
 		if item.ProblemList != nil {
 			entry.ProblemList = &domain.ProblemListImport{
 				Name:      item.ProblemList.Name,
 				SourceID:  item.ProblemList.SourceID,
 				SourceURL: item.ProblemList.SourceURL,
+				Truncated: item.ProblemList.Truncated,
 			}
 		}
 		items = append(items, entry)

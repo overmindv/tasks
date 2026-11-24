@@ -135,7 +135,7 @@ func newHandlerRepository() (*handlerRepository, uuid.UUID, uuid.UUID) {
 }
 
 // testHandler собирает HTTP handler с тихим логгером.
-func testHandler(repo *handlerRepository) http.Handler {
+func testHandler(repo repository.Repository) http.Handler {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	mux := http.NewServeMux()
 	Register(

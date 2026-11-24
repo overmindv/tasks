@@ -287,6 +287,74 @@ paths:
       responses:
         "200": { description: Отклонённый кандидат }
         "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/problem-lists:
+    get:
+      summary: Журнал списков задач без ограничения видимости
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRoles"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Пагинированный журнал списков с числом членов
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProblemListPage" }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /v1/admin/problem-lists/{id}:
+    get:
+      summary: Детали списка задач, включая черновики и метаданные модерации
+      parameters:
+        - $ref: "#/components/parameters/TaskID"
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRoles"
+      responses:
+        "200":
+          description: Список с членами и числом ожидающих кандидатов
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProblemListDetail" }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/problem-lists:
+    get:
+      summary: Журнал списков задач для пользователя
+      description: В счётчик попадают только опубликованные задачи.
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRoles"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Пагинированный журнал списков с числом опубликованных членов
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProblemListPage" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/problem-lists/{id}:
+    get:
+      summary: Детали списка задач для пользователя
+      description: Возвращаются только опубликованные задачи; черновики и метаданные модерации скрыты.
+      parameters:
+        - $ref: "#/components/parameters/TaskID"
+        - $ref: "#/components/parameters/UserID"
+        - $ref: "#/components/parameters/UserRoles"
+      responses:
+        "200":
+          description: Список с опубликованными членами
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProblemListDetail" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /v1/tasks:
     get:
       summary: Получить опубликованные тесты
@@ -1029,6 +1097,65 @@ components:
           type: array
           maxItems: 50
           items: { type: string }
+        problem_list: { $ref: "#/components/schemas/ProblemListImport" }
+        problem_list_position:
+          type: [integer, "null"]
+          minimum: 0
+          description: Место задачи в порядке сбора; при отсутствии присваивается по порядку batch.
+    ProblemListImport:
+      type: object
+      additionalProperties: false
+      required: [name, source_id, source_url]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        source_id: { type: string, minLength: 1, maxLength: 100 }
+        source_url: { type: string, minLength: 1, maxLength: 1000 }
+        truncated:
+          type: boolean
+          default: false
+          description: Источник собрал список частично; полный повторный сбор снимает отметку.
+    ProblemList:
+      type: object
+      required: [id, name, source_id, source_url, truncated, member_count, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        source_id: { type: string }
+        source_url: { type: string }
+        truncated: { type: boolean }
+        member_count: { type: integer, minimum: 0 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ProblemListMember:
+      type: object
+      required: [task_id, title, difficulty, status]
+      properties:
+        task_id: { type: string, format: uuid }
+        title: { type: string }
+        difficulty: { $ref: "#/components/schemas/Difficulty" }
+        status: { type: string }
+    ProblemListDetail:
+      allOf:
+        - $ref: "#/components/schemas/ProblemList"
+        - type: object
+          required: [pending_candidates, members]
+          properties:
+            pending_candidates:
+              type: integer
+              minimum: 0
+              description: Скрыто (0) для обычного пользователя.
+            members:
+              type: array
+              items: { $ref: "#/components/schemas/ProblemListMember" }
+    ProblemListPage:
+      type: object
+      required: [items, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ProblemList" }
+        limit: { type: integer }
+        offset: { type: integer }
     PublicTask:
       allOf:
         - $ref: "#/components/schemas/TaskBase"
