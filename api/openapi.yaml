@@ -835,9 +835,17 @@ components:
       additionalProperties: false
       required: [language, language_version, checker, limits, cases]
       properties:
-        language: {type: string, enum: [python, go]}
-        language_version: {type: string, pattern: '^[0-9]+\.[0-9]+(\.[0-9]+)?$'}
-        checker: {type: string, enum: [exact, trim_newlines]}
+        language: {type: string, enum: [python, go, sqlite]}
+        language_version:
+          type: string
+          pattern: '^[0-9]+\.[0-9]+(\.[0-9]+)?$'
+          description: Для sqlite версия должна совпадать с CODE_EXECUTION_SQLITE_VERSION.
+        checker:
+          type: string
+          enum: [exact, trim_newlines, sqlite_rows]
+          description: >-
+            sqlite_rows обязателен для sqlite: сравнивает JSON-строки с учётом дублей;
+            порядок проверяется по флагу ordered в наборе данных кейса.
         limits:
           type: object
           additionalProperties: false
@@ -906,7 +914,7 @@ components:
       enum: [accepted, wrong_answer]
     ProgrammingLanguage:
       type: string
-      enum: [python, go]
+      enum: [python, go, sqlite]
     CodeSubmissionStatus:
       type: string
       enum: [queued, completed]
@@ -1286,11 +1294,15 @@ components:
         file:
           type: string
           format: binary
-          description: UTF-8 файл до 262144 байт; .py для python или .go для go. Взаимоисключающ с source_code.
+          description: >-
+            UTF-8 файл: .py для python, .go для go, .sql для sqlite (до 65536 байт).
+            Взаимоисключающ с source_code.
         source_code:
           type: string
           maxLength: 262144
-          description: Код из консоли до 262144 байт. Взаимоисключающ с file.
+          description: >-
+            Код из консоли: до 262144 байт, для sqlite — до 65536 байт.
+            Взаимоисключающ с file.
     ExecutionPhaseResult:
       type: object
       required: [stdout, stderr, duration_ms, memory_bytes]

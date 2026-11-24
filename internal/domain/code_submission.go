@@ -23,6 +23,7 @@ type ProgrammingLanguage string
 const (
 	ProgrammingLanguagePython ProgrammingLanguage = "python"
 	ProgrammingLanguageGo     ProgrammingLanguage = "go"
+	ProgrammingLanguageSQLite ProgrammingLanguage = "sqlite"
 )
 
 // CodeSubmissionStatus описывает асинхронный lifecycle решения программной задачи.
@@ -166,6 +167,8 @@ func DefaultSourceFileName(language ProgrammingLanguage) (string, error) {
 		return "solution.py", nil
 	case ProgrammingLanguageGo:
 		return "main.go", nil
+	case ProgrammingLanguageSQLite:
+		return "solution.sql", nil
 	default:
 		return "", fmt.Errorf("неподдерживаемый язык %q", language)
 	}
@@ -173,15 +176,20 @@ func DefaultSourceFileName(language ProgrammingLanguage) (string, error) {
 
 // ValidateSourceFile проверяет allowlist языка, расширение, размер и текстовый формат файла.
 func ValidateSourceFile(language ProgrammingLanguage, fileName, sourceCode string) error {
-	if language != ProgrammingLanguagePython && language != ProgrammingLanguageGo {
+	expectedExtension, maxSize := "", MaxSourceFileSize
+	switch language {
+	case ProgrammingLanguagePython:
+		expectedExtension = ".py"
+	case ProgrammingLanguageGo:
+		expectedExtension = ".go"
+	case ProgrammingLanguageSQLite:
+		// Sandbox ограничивает текст запроса 64 KiB.
+		expectedExtension, maxSize = ".sql", MaxSQLiteQueryBytes
+	default:
 		return fmt.Errorf("неподдерживаемый язык %q", language)
 	}
 	if fileName == "" || fileName == "." || len([]rune(fileName)) > MaxSourceFileNameLength {
 		return fmt.Errorf("имя файла должно содержать от 1 до %d символов", MaxSourceFileNameLength)
-	}
-	expectedExtension := ".py"
-	if language == ProgrammingLanguageGo {
-		expectedExtension = ".go"
 	}
 	if !strings.EqualFold(path.Ext(fileName), expectedExtension) {
 		return fmt.Errorf("для языка %s требуется файл %s", language, expectedExtension)
@@ -189,8 +197,8 @@ func ValidateSourceFile(language ProgrammingLanguage, fileName, sourceCode strin
 	if sourceCode == "" {
 		return fmt.Errorf("файл решения пуст")
 	}
-	if len(sourceCode) > MaxSourceFileSize {
-		return fmt.Errorf("размер файла не должен превышать %d байт", MaxSourceFileSize)
+	if len(sourceCode) > maxSize {
+		return fmt.Errorf("размер файла не должен превышать %d байт", maxSize)
 	}
 	if !utf8.ValidString(sourceCode) || strings.IndexByte(sourceCode, 0) >= 0 {
 		return fmt.Errorf("файл решения должен быть текстом UTF-8 без NUL-байтов")

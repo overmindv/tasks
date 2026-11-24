@@ -83,6 +83,7 @@ func Build(app *parker.App) error {
 	languageVersions := map[domain.ProgrammingLanguage]string{
 		domain.ProgrammingLanguagePython: cfg.PythonVersion,
 		domain.ProgrammingLanguageGo:     cfg.GoVersion,
+		domain.ProgrammingLanguageSQLite: cfg.SQLiteVersion,
 	}
 	topics, err := topiccatalog.New(os.Getenv("TASKS_ENTITIES_URL"))
 	if err != nil {
