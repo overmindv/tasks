@@ -125,7 +125,7 @@ func TestTaskActivityOutboxExpiredLeasePostgres(t *testing.T) {
 func insertActivityEvent(t *testing.T, ctx context.Context, pool *pgxpool.Pool, attempts int) string {
 	t.Helper()
 	id := uuid.NewString()
-	if _, err := pool.Exec(ctx, `INSERT INTO outbox (id, topic, message_key, message_value, attempts) VALUES ($1,'task.activity.v1',$1,$2,$3)`, id, []byte(`{"event":"task.published"}`), attempts); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO outbox (id, topic, message_key, message_value, attempts) VALUES ($1,'task.activity.v1',$2,$3,$4)`, id, id, []byte(`{"event":"task.published"}`), attempts); err != nil {
 		t.Fatal(err)
 	}
 
