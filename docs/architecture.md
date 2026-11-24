@@ -112,3 +112,12 @@ Samples проверяет examples и не участвует в прогрес
 suite закреплённой версии; hidden stdout/stderr не сохраняются. Миграция трактует
 исторические code submissions как samples. Контракт, rollout и ограничения:
 [OVM-244](changes/OVM-244.md), [публикация suite](changes/OVM-243.md).
+
+### Списки задач (OVM-251)
+
+`problem_lists` создаются идемпотентно по `source_url` при импорте кандидатов из
+`task-hunter`. Признак `truncated` отражает частичный сбор; `problem_list_position`
+фиксирует порядок сбора и переносится в `problem_list_members` при одобрении.
+Пользовательская выдача (`/v1/problem-lists`) показывает только опубликованные
+задачи, административная (`/v1/admin/problem-lists`) — черновики и метаданные
+модерации. Детали и контракт: [problem-lists](problem-lists.md).

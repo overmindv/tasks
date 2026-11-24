@@ -13,6 +13,7 @@ type problemListResponse struct {
 	Name        string    `json:"name"`
 	SourceID    string    `json:"source_id"`
 	SourceURL   string    `json:"source_url"`
+	Truncated   bool      `json:"truncated"`
 	MemberCount int       `json:"member_count"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -32,17 +33,31 @@ type problemListDetailResponse struct {
 }
 
 // listProblemLists возвращает журнал списков задач с числом опубликованных членов.
+// Обычный пользователь видит только опубликованные задачи, администратор — все.
 func (h *Handler) listProblemLists(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireUser(w, r)
+	if !ok {
+		return
+	}
+	h.writeProblemLists(w, r, actor.Admin)
+}
+
+// listAdminProblemLists — журнал списков без ограничения видимости.
+func (h *Handler) listAdminProblemLists(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireAdmin(w, r); !ok {
 		return
 	}
+	h.writeProblemLists(w, r, true)
+}
+
+func (h *Handler) writeProblemLists(w http.ResponseWriter, r *http.Request, admin bool) {
 	limit, offset, err := pagination(r)
 	if err != nil {
 		writeError(w, err, h.logger)
 
 		return
 	}
-	items, err := h.problemLists.List(r.Context(), limit, offset)
+	items, err := h.problemLists.List(r.Context(), limit, offset, admin)
 	if err != nil {
 		writeError(w, err, h.logger)
 
@@ -59,22 +74,40 @@ func (h *Handler) listProblemLists(w http.ResponseWriter, r *http.Request) {
 
 // getProblemList возвращает детали списка вместе с опубликованными задачами.
 func (h *Handler) getProblemList(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireUser(w, r)
+	if !ok {
+		return
+	}
+	h.writeProblemListDetail(w, r, actor.Admin)
+}
+
+// getAdminProblemList — детали списка без ограничения видимости.
+func (h *Handler) getAdminProblemList(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireAdmin(w, r); !ok {
 		return
 	}
+	h.writeProblemListDetail(w, r, true)
+}
+
+func (h *Handler) writeProblemListDetail(w http.ResponseWriter, r *http.Request, admin bool) {
 	id, ok := pathUUID(w, r, "id")
 	if !ok {
 		return
 	}
-	detail, err := h.problemLists.Get(r.Context(), id)
+	detail, err := h.problemLists.Get(r.Context(), id, admin)
 	if err != nil {
 		writeError(w, err, h.logger)
 
 		return
 	}
+	// Число ожидающих модерации кандидатов — административные метаданные.
+	pendingCandidates := 0
+	if admin {
+		pendingCandidates = detail.PendingCandidates
+	}
 	response := problemListDetailResponse{
 		problemListResponse: responseProblemList(detail.ProblemList, detail.MemberCount),
-		PendingCandidates:   detail.PendingCandidates,
+		PendingCandidates:   pendingCandidates,
 		Members: lo.Map(detail.Members, func(item domain.ProblemListMember, _ int) problemListMemberResponse {
 			return problemListMemberResponse{
 				TaskID: item.TaskID.String(), Title: item.Title,
@@ -89,6 +122,6 @@ func (h *Handler) getProblemList(w http.ResponseWriter, r *http.Request) {
 func responseProblemList(item domain.ProblemList, memberCount int) problemListResponse {
 	return problemListResponse{
 		ID: item.ID.String(), Name: item.Name, SourceID: item.SourceID, SourceURL: item.SourceURL,
-		MemberCount: memberCount, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+		Truncated: item.Truncated, MemberCount: memberCount, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
 }

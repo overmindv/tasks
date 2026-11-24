@@ -2,41 +2,41 @@ package postgresadapter
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/overmindv/tasks/internal/apperror"
 	"github.com/overmindv/tasks/internal/domain"
 )
 
 const candidateColumns = `id, status, revision, external_id, source_id, source_name, source_url, source_hash,
 source_published_at, retrieved_at, collection_job_id, topic_id, title, statement, difficulty, problem_list_id,
-approved_task_id, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at`
+approved_task_id, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at, problem_list_position`
 
 type rowScanner interface {
 	Scan(dest ...any) error
 }
 
 // InsertCandidate атомарно добавляет нового кандидата; дубликат возвращает false.
+// ON CONFLICT DO NOTHING не переводит транзакцию в aborted, поэтому повтор
+// импорта остаётся идемпотентным внутри одной транзакции со списком.
 func (r *Postgres) InsertCandidate(ctx context.Context, candidate domain.TaskCandidate) (bool, error) {
-	_, err := r.query.Exec(ctx, `INSERT INTO task_candidates (
+	tag, err := r.query.Exec(ctx, `INSERT INTO task_candidates (
 id, status, revision, external_id, source_id, source_name, source_url, source_hash, source_published_at,
-retrieved_at, collection_job_id, title, statement, difficulty, problem_list_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+retrieved_at, collection_job_id, title, statement, difficulty, problem_list_id, problem_list_position
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+ON CONFLICT DO NOTHING`,
 		candidate.ID, candidate.Status, candidate.Revision, candidate.ExternalID, candidate.SourceID,
 		candidate.SourceName, candidate.SourceURL, candidate.SourceHash, candidate.SourcePublishedAt,
-		candidate.RetrievedAt, candidate.CollectionJobID, candidate.Title, candidate.Statement, candidate.Difficulty, candidate.ProblemListID)
+		candidate.RetrievedAt, candidate.CollectionJobID, candidate.Title, candidate.Statement, candidate.Difficulty,
+		candidate.ProblemListID, candidate.ProblemListPosition)
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return false, nil
-		}
-
 		return false, fmt.Errorf("insert task candidate: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return false, nil
 	}
 	if err := r.replaceCandidateContent(ctx, candidate); err != nil {
 		return false, err
@@ -268,7 +268,7 @@ func scanCandidate(row rowScanner) (domain.TaskCandidate, error) {
 		&candidate.RetrievedAt, &candidate.CollectionJobID, &candidate.TopicID, &candidate.Title,
 		&candidate.Statement, &candidate.Difficulty, &candidate.ProblemListID, &candidate.ApprovedTaskID,
 		&candidate.ReviewedBy, &candidate.ReviewedAt, &candidate.RejectionReason, &candidate.CreatedAt,
-		&candidate.UpdatedAt)
+		&candidate.UpdatedAt, &candidate.ProblemListPosition)
 	candidate.Status = domain.CandidateStatus(status)
 
 	return candidate, err

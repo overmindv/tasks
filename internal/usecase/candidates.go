@@ -33,8 +33,17 @@ func NewCandidateService(store repository.Repository) *CandidateService {
 // ImportBatch валидирует и идемпотентно сохраняет каждый элемент независимо.
 func (s *CandidateService) ImportBatch(ctx context.Context, inputs []domain.CandidateImport) []CandidateImportResult {
 	results := make([]CandidateImportResult, 0, len(inputs))
+	// Порядок batch задаёт место задачи в списке, если источник не передал его явно.
+	listPosition := 0
 	for _, raw := range inputs {
 		input := domain.NormalizeCandidateImport(raw)
+		if input.ProblemList != nil {
+			if input.ProblemListPosition == nil {
+				position := listPosition
+				input.ProblemListPosition = &position
+			}
+			listPosition++
+		}
 		result := CandidateImportResult{ExternalID: input.ExternalID}
 		if err := domain.ValidateCandidateImport(input); err != nil {
 			result.Status = "invalid"
@@ -172,7 +181,7 @@ func (s *CandidateService) Approve(ctx context.Context, id, actorID uuid.UUID, r
 		}
 		// Членство сохраняется, но публичный список скрывает draft до публикации.
 		if candidate.ProblemListID != nil {
-			if err := tx.InsertProblemListMember(ctx, *candidate.ProblemListID, taskID, 0); err != nil {
+			if err := tx.InsertProblemListMember(ctx, *candidate.ProblemListID, taskID, candidate.ProblemListPosition); err != nil {
 				return fmt.Errorf("add approved task to problem list: %w", err)
 			}
 		}
@@ -225,6 +234,7 @@ func candidateFromImport(input domain.CandidateImport) domain.TaskCandidate {
 		SourceHash: input.SourceHash, SourcePublishedAt: input.SourcePublishedAt, RetrievedAt: input.RetrievedAt,
 		CollectionJobID: input.CollectionJobID, Title: input.Title, Statement: input.Statement,
 		Difficulty: input.Difficulty, Tags: input.Tags, Examples: input.Examples, Constraints: input.Constraints,
+		ProblemListPosition: input.ProblemListPosition,
 	}
 }
 

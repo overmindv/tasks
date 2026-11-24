@@ -42,7 +42,7 @@ func (r *candidateMemoryRepository) GetOrCreateProblemList(_ context.Context, in
 }
 
 // InsertProblemListMember фиксирует членство опубликованной задачи в списке.
-func (r *candidateMemoryRepository) InsertProblemListMember(_ context.Context, _ uuid.UUID, taskID uuid.UUID, _ int) error {
+func (r *candidateMemoryRepository) InsertProblemListMember(_ context.Context, _ uuid.UUID, taskID uuid.UUID, _ *int) error {
 	if r.task.ID != taskID {
 		return fmt.Errorf("member task mismatch")
 	}

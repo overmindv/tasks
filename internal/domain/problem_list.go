@@ -21,6 +21,9 @@ type ProblemList struct {
 	Name      string
 	SourceID  string
 	SourceURL string
+	// Truncated означает, что источник отдал не весь список: внешний API
+	// ограничил страницу или часть задач не загрузилась.
+	Truncated bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -30,6 +33,8 @@ type ProblemListImport struct {
 	Name      string
 	SourceID  string
 	SourceURL string
+	// Truncated выставляет источник, если собрал список частично.
+	Truncated bool
 }
 
 // ProblemListSummary — список с числом опубликованных задач-членов.
