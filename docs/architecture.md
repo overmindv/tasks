@@ -69,6 +69,15 @@ rebalance timeout 60 секунд. При исчерпании бюджета co
 `TEST_KAFKA_BROKERS=127.0.0.1:39092 go test -race -tags=integration ./internal/transport/kafka`.
 Тест инъецирует ошибку хранилища на границе use case; PostgreSQL он не заменяет.
 
+## Лента активности (Feed)
+
+Публикация задачи пишет business-событие в `task.activity.v1` через parker-outbox
+в транзакции смены статуса. Для пересборки ленты после retention Kafka сервис
+дополнительно ведёт durable-журнал `task_activity_changes`: триггер на `tasks`
+фиксирует публикацию и снятие с публикации в порядке коммитов. Журнал отдаётся
+внутренним потребителям страницами на закреплённом watermark:
+`GET /v1/internal/task-activity/changes`. Контракт — [task-activity.md](task-activity.md).
+
 ## Безопасность
 
 Сервис не должен публиковаться напрямую наружу. Роли принимаются только от внутреннего `api-gateway`; admin-операции разрешены `admin` и `superuser`. До submit public API никогда не возвращает `is_correct`.
