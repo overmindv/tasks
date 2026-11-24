@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/overmindv/parker"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
@@ -19,8 +20,15 @@ type Publisher interface {
 
 // NewConsumerClient создаёт отдельный group consumer с ручным offset commit
 // для чтения финальных результатов выполнения кода от sandbox.
-func NewConsumerClient(brokers []string, topic, group string) (*kgo.Client, error) {
-	client, err := kgo.NewClient(
+//
+// TLS/SASL берутся из parker: без аргументов настройки читаются из окружения
+// так же, как у producer, и production без TLS отклоняется до подключения.
+func NewConsumerClient(brokers []string, topic, group string, security ...parker.KafkaSecurity) (*kgo.Client, error) {
+	securityOptions, err := parker.KafkaClientOptions(security...)
+	if err != nil {
+		return nil, fmt.Errorf("create Kafka result consumer: %w", err)
+	}
+	options := append(securityOptions,
 		kgo.SeedBrokers(brokers...),
 		kgo.ConsumeTopics(topic),
 		kgo.ConsumerGroup(group),
@@ -28,6 +36,7 @@ func NewConsumerClient(brokers []string, topic, group string) (*kgo.Client, erro
 		kgo.BlockRebalanceOnPoll(),
 		kgo.RebalanceTimeout(2*resultRetryBudget),
 	)
+	client, err := kgo.NewClient(options...)
 	if err != nil {
 		return nil, fmt.Errorf("create Kafka result consumer: %w", err)
 	}

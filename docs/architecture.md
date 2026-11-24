@@ -51,6 +51,8 @@ Transport DTO не используются как доменные или Postg
 
 Доставка request events — at-least-once: после Kafka ack и до PostgreSQL mark возможен повтор. Стабильный `attempt_id` внутри доставки позволяет sandbox дедуплицировать запуск; новый retry tasks получает новый ID. Result events дедуплицируются одновременно по Kafka topic/partition/offset и `event_id`. Невалидные сообщения записываются в inbox без payload и подтверждаются, чтобы не создавать poison-message loop.
 
+Producer и results consumer используют общие TLS/SASL-настройки parker (`KAFKA_TLS_*`, `KAFKA_SASL_*`): в production TLS обязателен, SASL — только поверх TLS, конфигурация проверяется до подключения к брокеру.
+
 ### Повторная обработка результатов (OVM-255)
 
 Ошибка сохранения результата удерживает текущую Kafka-запись: следующего poll
