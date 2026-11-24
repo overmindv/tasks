@@ -16,11 +16,11 @@ type problemListMemoryRepository struct {
 	detail domain.ProblemListDetail
 }
 
-func (r *problemListMemoryRepository) ListProblemLists(_ context.Context, _ int, _ int) ([]domain.ProblemListSummary, error) {
+func (r *problemListMemoryRepository) ListProblemLists(_ context.Context, _ int, _ int, _ bool) ([]domain.ProblemListSummary, error) {
 	return r.lists, nil
 }
 
-func (r *problemListMemoryRepository) GetProblemListDetail(_ context.Context, _ uuid.UUID) (domain.ProblemListDetail, error) {
+func (r *problemListMemoryRepository) GetProblemListDetail(_ context.Context, _ uuid.UUID, _ bool) (domain.ProblemListDetail, error) {
 	return r.detail, nil
 }
 
@@ -39,7 +39,7 @@ func TestProblemListServiceList(t *testing.T) {
 	}}
 	service := NewProblemListService(repo)
 
-	items, err := service.List(context.Background(), 20, 0)
+	items, err := service.List(context.Background(), 20, 0, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestProblemListServiceGet(t *testing.T) {
 	}}
 	service := NewProblemListService(repo)
 
-	detail, err := service.Get(context.Background(), uuid.New())
+	detail, err := service.Get(context.Background(), uuid.New(), true)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,9 +20,10 @@ func NewProblemListService(store repository.Repository) *ProblemListService {
 }
 
 // List возвращает пагинированный журнал списков задач.
-func (s *ProblemListService) List(ctx context.Context, limit, offset int) ([]domain.ProblemListSummary, error) {
+// Не-администратор видит счётчик только по опубликованным задачам.
+func (s *ProblemListService) List(ctx context.Context, limit, offset int, admin bool) ([]domain.ProblemListSummary, error) {
 	limit, offset = domain.NormalizePagination(limit, offset)
-	items, err := s.repository.ListProblemLists(ctx, limit, offset)
+	items, err := s.repository.ListProblemLists(ctx, limit, offset, admin)
 	if err != nil {
 		return nil, fmt.Errorf("list problem lists: %w", err)
 	}
@@ -31,8 +32,9 @@ func (s *ProblemListService) List(ctx context.Context, limit, offset int) ([]dom
 }
 
 // Get возвращает детали списка вместе с опубликованными членами.
-func (s *ProblemListService) Get(ctx context.Context, id uuid.UUID) (domain.ProblemListDetail, error) {
-	detail, err := s.repository.GetProblemListDetail(ctx, id)
+// Не-администратор не видит неопубликованные задачи списка.
+func (s *ProblemListService) Get(ctx context.Context, id uuid.UUID, admin bool) (domain.ProblemListDetail, error) {
+	detail, err := s.repository.GetProblemListDetail(ctx, id, admin)
 	if err != nil {
 		return domain.ProblemListDetail{}, fmt.Errorf("get problem list: %w", err)
 	}
