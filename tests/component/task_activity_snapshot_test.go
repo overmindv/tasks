@@ -189,11 +189,16 @@ func activityStore(t *testing.T, ctx context.Context) (*pgxpool.Pool, activitySt
 func insertActivityTask(t *testing.T, ctx context.Context, pool *pgxpool.Pool, title string) (uuid.UUID, uuid.UUID) {
 	t.Helper()
 	taskID, versionID, actor := uuid.New(), uuid.New(), uuid.New()
-	if _, err := pool.Exec(ctx, `INSERT INTO tasks (id, current_version_id, status, created_by, updated_by) VALUES ($1,$2,'draft',$3,$3)`, taskID, versionID, actor); err != nil {
+	// current_version_id ссылается на task_versions, поэтому версия создаётся
+	// первой, а указатель проставляется отдельным UPDATE.
+	if _, err := pool.Exec(ctx, `INSERT INTO tasks (id, status, created_by, updated_by) VALUES ($1,'draft',$2,$2)`, taskID, actor); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO task_versions (id, task_id, version_number, title, statement, task_type, difficulty, created_by) VALUES ($1,$2,1,$3,'statement','single_choice','easy',$4)`,
 		versionID, taskID, title, actor); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE tasks SET current_version_id=$2 WHERE id=$1`, taskID, versionID); err != nil {
 		t.Fatal(err)
 	}
 
