@@ -9,6 +9,29 @@ import (
 // TaskActivityTopic — топик business-событий задач для ленты активностей.
 const TaskActivityTopic = "task.activity.v1"
 
+// Типы записей durable-журнала публикаций: карточка появляется при публикации
+// и снимается при уходе из published (архив, возврат в draft) или удалении.
+const (
+	TaskActivityPublished   = "task.published"
+	TaskActivityUnpublished = "task.unpublished"
+)
+
+// TaskActivityChange — запись журнала публикаций задачи. Revision растёт
+// в порядке коммитов и служит watermark и курсором постраничного чтения;
+// EventID остаётся стабильным идентификатором события для повторов.
+type TaskActivityChange struct {
+	Revision      int64
+	EventID       uuid.UUID
+	OccurredAt    time.Time
+	TaskID        uuid.UUID
+	TaskVersionID *uuid.UUID
+	EventType     string
+	Title         *string
+	TopicID       *uuid.UUID
+	TaskType      *string
+	Difficulty    *string
+}
+
 // TaskActivityOutboxMessage — исходящее business-событие tasks для ленты
 // активностей (топик task.activity.v1), сохраняемое атомарно с публикацией
 // задачи. Отличается от OutboxMessage (выполнение кода) — использует стандартную
