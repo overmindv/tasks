@@ -71,3 +71,16 @@ docker build -t tasks:local .
 - будущие изменения связанных сервисов: каталог [`docs/integrations`](docs/integrations).
 
 Административные и пользовательские методы доверяют заголовкам `X-User-ID` и `X-User-Roles`, которые может выставлять только `api-gateway` во внутренней сети.
+
+## Jet: общая конвенция OVM-341
+
+Jet закреплён в `go.mod` на `v2.15.0`; CLI объявлен через `tool` и запускается
+командой `go tool jet`. Это сохраняет версию при `go mod tidy` до переноса SQL.
+Перевод repository на сгенерированные таблицы выполняется отдельно в OVM-344.
+Модели читаются из live-схемы БД владельца после миграций, коммитятся и не
+редактируются вручную. Целевой каталог: `internal/adapter/postgres/generated`.
+`make jet-generate` читает `JET_DATABASE_DSN` из окружения и использует
+`JET_SCHEMA=public`. CLI пока сохраняет legacy-подкаталоги имени БД/схемы;
+нормализация пути и перевод потребителей входят в сервисную задачу выше.
+
+Порядок генерации и проверки дрейфа: [конвенция Jet](https://github.com/overmindv/docs/blob/main/architecture/jet-generation.md).
