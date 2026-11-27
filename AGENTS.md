@@ -962,3 +962,10 @@ Do not claim that a command passed unless it was actually executed.
 - Проверки: `make -C ../infra agent-verify SERVICE=tasks DRY_RUN=1` показывает команды.
 - В конце приведи фактические результаты и непроверенные места; сохрани следующий шаг.
 - Не публикуй, не очищай БД и не отправляй изменения автоматически.
+
+## Jet (OVM-341)
+
+- Сохранять `github.com/go-jet/jet/v2 v2.15.0` и tool pin; не использовать `@latest`.
+- Generated модели не править руками; изменения схемы требуют регенерации и drift check.
+- DSN передавать через `JET_DATABASE_DSN`, не печатать в командах/логах.
+- Текущий объём и переходный путь генерации описаны в разделе Jet в `README.md`.

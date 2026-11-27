@@ -1,5 +1,7 @@
+JET_SCHEMA ?= public
+JET_OUTPUT_DIR ?= ./internal/adapter/postgres/generated
+
 LOCAL_BIN := $(CURDIR)/bin
-JET := $(LOCAL_BIN)/jet
 GOLANGCI_LINT := $(LOCAL_BIN)/golangci-lint
 DATABASE_URL ?= postgres://postgres:postgres@localhost:5432/tasks?sslmode=disable
 COMPONENT_TEST_DSN ?=
@@ -51,16 +53,14 @@ migrate-down:
 
 # jet-generate — перегенерирует типизированные Jet-модели из live-schema БД.
 # Нужен только при изменении схемы; требует поднятого PostgreSQL.
-jet-generate: $(JET)
-	$(JET) -source=PostgreSQL -dsn="$(DATABASE_URL)" -schema=public -path=./internal/adapter/postgres/generated
+jet-generate:
+	@test -n "$$JET_DATABASE_DSN" || { echo "JET_DATABASE_DSN is required" >&2; exit 1; }
+	@go tool jet -source=postgres -dsn="$$JET_DATABASE_DSN" -schema="$(JET_SCHEMA)" -path="$(JET_OUTPUT_DIR)" >/dev/null 2>&1 || { echo "Jet generation failed; check database access and schema" >&2; exit 1; }
 
 # tidy — приводит go.mod/go.sum в соответствие с импортами.
 tidy:
 	go mod tidy
 
 # Установка вспомогательных инструментов в bin/ (один раз, gitignored).
-$(JET):
-	GOBIN="$(LOCAL_BIN)" go install github.com/go-jet/jet/v2/cmd/jet@v2.14.0
-
 $(GOLANGCI_LINT):
 	GOBIN="$(LOCAL_BIN)" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4
